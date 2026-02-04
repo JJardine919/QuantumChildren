@@ -1,0 +1,11 @@
+{
+  "symbols": ["BTCUSD", "XAUUSD"],
+  "timeframe": "M5",
+  "lot_size": 0.01,
+  "confidence_threshold": 0.55,
+  "entropy_threshold": 4.5,
+  "max_positions": 3,
+  "check_interval": 60,
+  "enable_trading": false,
+  "magic_number": 777777
+}

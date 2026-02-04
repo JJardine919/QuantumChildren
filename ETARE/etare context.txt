@@ -1,0 +1,804 @@
+
+Statistics and analysis
+Machine learning
+Interviews
+My own
+Do you like the article?
+Share it with others —
+post a link to it!
+Find us on Twitter!
+Join our fan page
+Use new possibilities of MetaTrader 5
+
+Similar articles
+From Novice to Expert: Statistical Validation of Supply and Demand Zones
+Market Simulation (Part 10): Sockets (IV)
+Graph Theory: Traversal Breadth-First Search (BFS) Applied in Trading
+Introduction to MQL5 (Part 37): Mastering API and WebRequest Function in MQL5 (XI)
+Risk Management (Part 3): Building the Main Class for Risk Management
+
+Use the ideas from this article
+to order your own robot
+on Freelance
+previewEvolutionary trading algorithm with reinforcement learning and extinction of feeble individuals (ETARE)
+Evolutionary trading algorithm with reinforcement learning and extinction of feeble individuals (ETARE)
+MetaTrader 5 — Integration | 7 October 2025 at 06:55
+2 425
+7
+Yevgeniy Koshtenko
+Yevgeniy Koshtenko
+Introduction
+Do you know what evolution, neural networks and traders have in common? They all learn from their mistakes. This is exactly the thought that came to me after yet another sleepless night at the terminal, when my "perfect" trading algorithm once again lost its deposit due to an unexpected market movement.
+
+I remember that day like it was yesterday: June 23, 2016, the Brexit referendum. My algorithm, based on classic technical analysis patterns, confidently held a long position on GBP. "All the polls show that Britain will remain in the EU," I thought then. At 4 a.m. Moscow time, when the first results showed a victory for Brexit supporters, GBP collapsed by 1800 points in a matter of minutes. My deposit lost 40%.
+
+In March 2023, I started developing ETARE - Evolutionary Trading Algorithm with Reinforcement and Extinction (Elimination). Why elimination? Because in nature, the strongest survive. So why not apply this principle to trading strategies?
+
+Are you ready to dive into the world where classic technical analysis meets the latest advances in artificial intelligence? Where every trading strategy struggles for survival in Darwinian natural selection? Then fasten your seat belts – it is going to be interesting. Because what you are about to see is not just another trading robot. It is the result of 15 years of trial and error, thousands of hours of programming and, frankly, a few destroyed deposits. But the main thing is that it is a working system that already brings real profit to its users.
+
+
+System architecture
+At the heart of ETARE is a hybrid architecture reminiscent of a modern quantum computer. Remember the days when we wrote simple scripts for MetaTrader 4 based on the intersection of two moving averages? At the time, it seemed like a breakthrough. Looking back now, I realize we were like ancient sailors trying to cross the ocean using only a compass and the stars.
+
+After the 2022 crash, it became clear that the market is too complex for simple solutions. That is when my journey into the world of machine learning began.
+
+class HybridTrader:
+    def __init__(self, symbols, population_size=50):
+        self.population = []  # Population of strategies
+        self.extinction_rate = 0.3  # Extinction rate
+        self.elite_size = 5  # Elite individuals
+        self.inefficient_extinction_interval = 5  # Cleaning interval
+Imagine a colony of ants, where each ant is a trading strategy. Strong individuals survive and pass on their genes to their offspring, while weak ones disappear. In my system, the role of genes is played by the weight ratios of the neural network.
+
+Why population_size=50? Because fewer strategies do not provide sufficient diversification, while more make it difficult to quickly adapt to market changes.
+
+In nature, ants constantly explore new territories, find food and pass on information to their relatives. In ETARE, each strategy also researches the market, and successful trading patterns are passed on to future generations through a cross-breeding mechanism:
+
+def _crossover(self, parent1, parent2):
+    child = TradingIndividual(self.input_size)
+    # Cross scales through a mask
+    for attr in ['input_weights', 'hidden_weights', 'output_weights']:
+        parent1_weights = getattr(parent1.weights, attr)
+        parent2_weights = getattr(parent2.weights, attr)
+        mask = np.random.random(parent1_weights.shape) < 0.5
+        child_weights = np.where(mask, parent1_weights, parent2_weights)
+        setattr(child.weights, attr, child_weights)
+    return child
+In December 2024, while analyzing trading logs, I noticed that the most successful codes are often "hybrids" of other successful approaches. Just as in nature, strong genes produce healthy offspring, so in algorithmic trading, successful patterns can combine to create even more efficient strategies.
+
+The heart of the system was the LSTM network, a special type of neural network with "memory". After months of experimenting with various architectures, from simple multilayer perceptrons to complex transformers, we settled on this configuration:
+
+class LSTMModel(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(LSTMModel, self).__init__()
+        self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
+        self.dropout = nn.Dropout(0.4)  # Protection from overfitting
+        self.fc = nn.Linear(hidden_size, output_size)
+    
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        out = self.dropout(out[:, -1, :])  # Use the last LSTM output
+        out = self.fc(out)
+        return out
+Every 100 trades, the system performs "cleaning" ruthlessly removing unprofitable strategies. This is one of the key mechanisms of ETARE, and its creation is a separate story. I remember a night in December 2023 when I was analyzing my trading logs and noticed a surprising pattern: most strategies that had shown losses in the first 100-150 trades continued to be unprofitable thereafter. This observation completely changed the system architecture:
+
+def _inefficient_extinction_event(self):
+    """Periodic extinction of inefficient individuals"""
+    initial_size = len(self.population)
+    
+    # Analyze efficiency of each strategy
+    performance_metrics = []
+    for individual in self.population:
+        metrics = {
+            'profit_factor': individual.total_profit / abs(individual.max_drawdown) if individual.max_drawdown != 0 else 0,
+            'win_rate': len([t for t in individual.trade_history if t.profit > 0]) / len(individual.trade_history) if individual.trade_history else 0,
+            'risk_adjusted_return': individual.total_profit / individual.volatility if individual.volatility != 0 else 0
+        }
+        performance_metrics.append(metrics)
+    
+    # Remove unprofitable strategies taking into account a comprehensive assessment
+    self.population = [ind for ind, metrics in zip(self.population, performance_metrics)
+                      if metrics['profit_factor'] > 1.5 or metrics['win_rate'] > 0.6]
+    
+    # Create new individuals with improved initialization
+    while len(self.population) < initial_size:
+        new_individual = TradingIndividual(self.input_size)
+        new_individual.mutate()  # Random mutations
+        
+        # Inherit successful patterns
+        if len(self.population) > 0:
+            parent = random.choice(self.population)
+            new_individual.inherit_patterns(parent)
+            
+        self.population.append(new_individual)
+The trading decision database acts as the system memory. Every decision, every result – everything is recorded for later analysis:
+
+def _save_to_db(self):
+    with self.conn:
+        self.conn.execute('DELETE FROM population')
+        for individual in self.population:
+            data = {
+                'weights': individual.weights.to_dict(),
+                'fitness': individual.fitness,
+                'profit': individual.total_profit
+            }
+            self.conn.execute(
+                'INSERT INTO population (data) VALUES (?)',
+                (json.dumps(data),)
+            )
+This entire complex mechanism operates as a single organism, constantly evolving and adapting to market changes. During periods of high volatility, such as when the VIX exceeds 25, the system automatically increases the reliability requirements of strategies. And during calm periods, it becomes more aggressive, allowing users to experiment with new trading patterns.
+
+
+
+Reinforcement learning mechanism
+There is a paradox in developing trading robots: the more complex the algorithm, the worse it performs in the real market. 
+
+That is why we have focused on simplicity and transparency in the ETARE learning mechanism. After two years of experimenting with different architectures, we arrived at a prioritized memory system:
+
+class RLMemory:
+    def __init__(self, capacity=10000):
+        self.memory = deque(maxlen=capacity)
+        self.priorities = deque(maxlen=capacity)
+        
+    def add(self, state, action, reward, next_state):
+        priority = max(self.priorities) if self.priorities else 1.0
+        self.memory.append((state, action, reward, next_state))
+        self.priorities.append(priority)
+Every trading decision is more than just a market entry, but a complex balance between risk and potential reward. See how the system learns from its decisions:
+
+def update(self, state, action, reward, next_state):
+    self.memory.add(state, action, reward, next_state)
+    self.total_profit += reward
+
+    if len(self.memory.memory) >= 32:
+        batch = self.memory.sample(32)
+        self._train_on_batch(batch)
+I have lost many times because the models could not adapt to a different market situation. It was then that the idea of adaptive learning was born. Now the system analyzes each transaction and adjusts its behavior:
+
+def _calculate_confidence(self, prediction, patterns):
+    # Baseline confidence from ML model
+    base_confidence = abs(prediction - 0.5) * 2
+    
+    # Consider historical experience
+    pattern_confidence = self._get_pattern_confidence(patterns)
+    
+    # Dynamic adaptation to the market
+    market_volatility = self._get_current_volatility()
+    return (base_confidence * 0.7 + pattern_confidence * 0.3) / market_volatility
+The key point is that the system does not just remember successful trades; it learns to understand why they were successful. This is made possible by the multi-layered backpropagation architecture implemented in PyTorch:
+
+def _train_on_batch(self, batch):
+    states = torch.FloatTensor(np.array([x[0] for x in batch]))
+    actions = torch.LongTensor(np.array([x[1].value for x in batch]))
+    rewards = torch.FloatTensor(np.array([x[2] for x in batch]))
+    next_states = torch.FloatTensor(np.array([x[3] for x in batch]))
+    
+    current_q = self.forward(states).gather(1, actions.unsqueeze(1))
+    next_q = self.forward(next_states).max(1)[0].detach()
+    target = rewards + self.gamma * next_q
+    
+    loss = self.criterion(current_q.squeeze(), target)
+    self.optimizer.zero_grad()
+    loss.backward()
+    self.optimizer.step()
+As a result, we have a system that learns not from ideal backtests, but from real trading experience. Over the past year of live market testing, ETARE has demonstrated its ability to adapt to a variety of market conditions, from calm trends to highly volatile periods.
+
+But the most important thing is that the system continues to evolve. With every trade, with every market loop, it gets a little smarter, a little more efficient. As one of our beta testers said, "This is the first time I have seen an algorithm that actually learns from its mistakes, rather than just adjusting parameters to fit historical data."
+
+
+The mechanism of extinction of feeble individuals
+Charles Darwin never traded in the financial markets, but his theory of evolution provides a remarkable description of the dynamics of successful trading strategies. In nature, it is not the strongest or fastest individuals that survive, but those that best adapt to environmental changes. The same thing happens in the market.
+
+History knows many cases where a "perfect" trading algorithm was obliterated after the first black swan. In 2015, I lost a significant portion of my deposit when the Swiss National Bank unpegged CHF from EUR. My algorithm at that time turned out to be completely unprepared for such an event. This got me thinking: why has nature been able to deal with black swans successfully for millions of years, while our algorithms have not?
+
+The answer came unexpectedly, while reading the book "On the Origin of Species". Darwin described how, during periods of abrupt climate change, it was not the most specialized species that survived, but those that retained the ability to adapt. It is this principle that forms the basis of the extinction mechanism in ETARE:
+
+def _inefficient_extinction_event(self):
+    """Periodic extinction of inefficient individuals"""
+    initial_population = len(self.population)
+    market_conditions = self._analyze_market_state()
+    
+    # Assessing the adaptability of each strategy
+    adaptability_scores = []
+    for individual in self.population:
+        score = self._calculate_adaptability(
+            individual, 
+            market_conditions
+        )
+        adaptability_scores.append(score)
+    
+    # Dynamic survival threshold
+    survival_threshold = np.percentile(
+        adaptability_scores, 
+        30  # The bottom 30% of the population is dying out
+    )
+    
+    # Merciless extinction
+    survivors = []
+    for ind, score in zip(self.population, adaptability_scores):
+        if score > survival_threshold:
+            survivors.append(ind)
+    
+    self.population = survivors
+    
+    # Restore population through mutations and crossbreeding
+    while len(self.population) < initial_population:
+        if len(self.population) >= 2:
+            # Crossbreeding of survivors
+            parent1 = self._tournament_selection()
+            parent2 = self._tournament_selection()
+            child = self._crossover(parent1, parent2)
+        else:
+            # Create a new individual 
+            child = TradingIndividual(self.input_size)
+        
+        # Mutations for adaptation
+        child.mutate(market_conditions.volatility)
+        self.population.append(child)
+Just as in nature, periods of mass extinction lead to the emergence of new, more advanced species, so in our system, periods of high volatility become a catalyst for the evolution of strategies. Take a look at the mechanism of natural selection:
+
+def _extinction_event(self):
+    # Analyze market conditions
+    market_phase = self._identify_market_phase()
+    volatility = self._calculate_market_volatility()
+    trend_strength = self._measure_trend_strength()
+    
+    # Adaptive sorting by survival
+    def fitness_score(individual):
+        return (
+            individual.profit_factor * 0.4 +
+            individual.sharp_ratio * 0.3 +
+            individual.adaptability_score * 0.3
+        ) * (1 + individual.correlation_with_market)
+    
+    self.population.sort(
+        key=fitness_score, 
+        reverse=True
+    )
+    
+    # Preserve elite with diversity in mind
+    elite_size = max(
+        5, 
+        int(len(self.population) * 0.1)
+    )
+    survivors = self.population[:elite_size]
+    
+    # Create a new generation
+    while len(survivors) < self.population_size:
+        if random.random() < 0.8:  # 80% crossover
+            # Tournament selection of parents
+            parent1 = self._tournament_selection()
+            parent2 = self._tournament_selection()
+            
+            # Crossbreeding considering account market conditions
+            child = self._adaptive_crossover(
+                parent1, 
+                parent2, 
+                market_phase
+            )
+        else:  # 20% elite mutation
+            # Clone with mutations
+            template = random.choice(survivors[:3])
+            child = self._clone_with_mutations(
+                template,
+                volatility,
+                trend_strength
+            )
+        survivors.append(child)
+We paid special attention to the fitness assessment mechanism. In nature, this is the ability of an individual to produce viable offspring; in our case, it is the ability of a strategy to generate profit in various market conditions:
+
+def evaluate_fitness(self, individual):
+    # Basic metrics
+    profit_factor = individual.total_profit / max(
+        abs(individual.total_loss), 
+        1e-6
+    )
+    
+    # Resistance to drawdowns
+    max_dd = max(individual.drawdown_history) if individual.drawdown_history else 0
+    drawdown_resistance = 1 / (1 + max_dd)
+    
+    # Profit sequence analysis
+    profit_sequence = [t.profit for t in individual.trade_history[-50:]]
+    consistency = self._analyze_profit_sequence(profit_sequence)
+    
+    # Correlation with the market
+    market_correlation = self._calculate_market_correlation(
+        individual.trade_history
+    )
+    
+    # Adaptability to changes
+    adaptability = self._measure_adaptability(
+        individual.performance_history
+    )
+    
+    # Comprehensive assessment
+    fitness = (
+        profit_factor * 0.3 +
+        drawdown_resistance * 0.2 +
+        consistency * 0.2 +
+        (1 - abs(market_correlation)) * 0.1 +
+        adaptability * 0.2
+    )
+    
+    return fitness
+This is how the mutation of surviving strategies occurs. This process is reminiscent of genetic mutations in nature, where random changes in DNA sometimes lead to the emergence of more viable organisms:
+
+def mutate(self, market_conditions):
+    """Adaptive mutation considering market conditions"""
+    # Dynamic adjustment of mutation strength
+    self.mutation_strength = self._calculate_mutation_strength(
+        market_conditions.volatility,
+        market_conditions.trend_strength
+    )
+    
+    if np.random.random() < self.mutation_rate:
+        # Mutation of neural network weights
+        for weight_matrix in [
+            self.weights.input_weights,
+            self.weights.hidden_weights,
+            self.weights.output_weights
+        ]:
+            # Mutation mask with adaptive threshold
+            mutation_threshold = 0.1 * (
+                1 + market_conditions.uncertainty
+            )
+            mask = np.random.random(weight_matrix.shape) < mutation_threshold
+            
+            # Volatility-aware mutation generation
+            mutations = np.random.normal(
+                0,
+                self.mutation_strength * market_conditions.volatility,
+                size=mask.sum()
+            )
+            
+            # Apply mutations
+            weight_matrix[mask] += mutations
+            
+        # Mutation of hyperparameters
+        if random.random() < 0.3:  # 30% chance
+            self._mutate_hyperparameters(market_conditions)
+Interestingly, in some versions of the system, during periods of high market volatility, the system automatically increases the intensity of mutations. This is reminiscent of how some bacteria accelerate mutations under stressful conditions. In our case:
+
+def _calculate_mutation_strength(self, volatility, trend_strength):
+    """Calculate mutation strength based on market conditions"""
+    base_strength = self.base_mutation_strength
+    
+    # Mutation enhancement under high volatility
+    volatility_factor = 1 + (volatility / self.average_volatility - 1)
+    
+    # Weaken mutations in a strong trend
+    trend_factor = 1 / (1 + trend_strength)
+    
+    # Mutation total strength
+    mutation_strength = (
+        base_strength * 
+        volatility_factor * 
+        trend_factor
+    )
+    
+    return np.clip(
+        mutation_strength,
+        self.min_mutation_strength,
+        self.max_mutation_strength
+    )
+The mechanism of population diversification is especially important. In nature, genetic diversity is the key to species survival. In ETARE, we have implemented a similar principle:
+
+def _maintain_population_diversity(self):
+    """ Maintain diversity in the population"""
+    # Calculate the strategy similarity matrix
+    similarity_matrix = np.zeros(
+        (len(self.population), len(self.population))
+    )
+    
+    for i, ind1 in enumerate(self.population):
+        for j, ind2 in enumerate(self.population[i+1:], i+1):
+            similarity = self._calculate_strategy_similarity(ind1, ind2)
+            similarity_matrix[i,j] = similarity_matrix[j,i] = similarity
+    
+    # Identify clusters of similar strategies
+    clusters = self._identify_strategy_clusters(similarity_matrix)
+    
+    # Forced diversification when necessary
+    for cluster in clusters:
+        if len(cluster) > self.max_cluster_size:
+            # We leave only the best strategies in the cluster
+            survivors = sorted(
+                cluster,
+                key=lambda x: x.fitness,
+                reverse=True
+            )[:self.max_cluster_size]
+            
+            # Replace the rest with new strategies
+            for idx in cluster[self.max_cluster_size:]:
+                self.population[idx] = TradingIndividual(
+                    self.input_size,
+                    mutation_rate=self.high_mutation_rate
+                )
+Result? The system that does not just trade, but evolves with the market. As Darwin said, it is not the strongest that survives, but the most adaptive. In the world of algorithmic trading, this is more relevant than ever.
+
+
+Trading decisions database
+Maintaining trading experience is just as important as gaining it. Over the years of working with algorithmic systems, I have repeatedly become convinced that without a reliable database, any trading system will sooner or later "forget" its best strategies. In ETARE, we have implemented multi-level storage for trading decisions:
+
+def _create_tables(self):
+    """ Create a database structure"""
+    with self.conn:
+        self.conn.execute('''
+            CREATE TABLE IF NOT EXISTS population (
+                id INTEGER PRIMARY KEY,
+                individual TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_update TIMESTAMP
+            )
+        ''')
+        
+        self.conn.execute('''
+            CREATE TABLE IF NOT EXISTS history (
+                id INTEGER PRIMARY KEY,
+                generation INTEGER,
+                individual_id INTEGER,
+                trade_history TEXT,
+                market_conditions TEXT,
+                FOREIGN KEY(individual_id) REFERENCES population(id)
+            )
+        ''')
+Every trade, every decision, even those that seem insignificant, become part of the system collective experience. Here is how we save data after each trading loop:
+
+def _save_to_db(self):
+    try:
+        with self.conn:
+            self.conn.execute('DELETE FROM population')
+            for individual in self.population:
+                individual_data = {
+                    'weights': {
+                        'input_weights': individual.weights.input_weights.tolist(),
+                        'hidden_weights': individual.weights.hidden_weights.tolist(),
+                        'output_weights': individual.weights.output_weights.tolist(),
+                        'hidden_bias': individual.weights.hidden_bias.tolist(),
+                        'output_bias': individual.weights.output_bias.tolist()
+                    },
+                    'fitness': individual.fitness,
+                    'total_profit': individual.total_profit,
+                    'trade_history': list(individual.trade_history),
+                    'market_metadata': self._get_market_conditions()
+                }
+                self.conn.execute(
+                    'INSERT INTO population (individual) VALUES (?)', 
+                    (json.dumps(individual_data),)
+                )
+    except Exception as e:
+        logging.error(f"Error saving population: {str(e)}")
+Even after a critical server failure, the entire system will be restored in just minutes, thanks to detailed logs and backups. Here is how the recovery mechanism works:
+
+def _load_from_db(self):
+    """Load population from database"""
+    try:
+        cursor = self.conn.execute('SELECT individual FROM population')
+        rows = cursor.fetchall()
+        for row in rows:
+            individual_data = json.loads(row[0])
+            individual = TradingIndividual(self.input_size)
+            individual.weights = GeneticWeights(**individual_data['weights'])
+            individual.fitness = individual_data['fitness']
+            individual.total_profit = individual_data['total_profit']
+            individual.trade_history = deque(
+                individual_data['trade_history'], 
+                maxlen=1000
+            )
+            self.population.append(individual)
+    except Exception as e:
+        logging.error(f"Error loading population: {str(e)}")
+We will pay special attention to the analysis of historical data. Every successful strategy leaves a trace that can be used to improve future decisions:
+
+def analyze_historical_performance(self):
+    """ Historical performance analysis"""
+    query = '''
+        SELECT h.*, p.individual 
+        FROM history h 
+        JOIN population p ON h.individual_id = p.id 
+        WHERE h.generation > ? 
+        ORDER BY h.generation DESC
+    '''
+    
+    cursor = self.conn.execute(query, (self.generation - 100,))
+    performance_data = cursor.fetchall()
+    
+    # Analyze patterns of successful strategies
+    success_patterns = defaultdict(list)
+    for record in performance_data:
+        trade_data = json.loads(record[3])
+        if trade_data['profit'] > 0:
+            market_conditions = json.loads(record[4])
+            key_pattern = self._extract_key_pattern(market_conditions)
+            success_patterns[key_pattern].append(trade_data)
+    
+    return success_patterns
+The ETARE database is not just a storage facility for information, but the true "brain" of the system, capable of analyzing the past and predicting the future. As my old mentor used to say: "A trading system without memory is like a trader without experience: he starts from scratch every day".
+
+
+Data and features
+Over the years of working with algorithmic trading, I have tried hundreds of indicator combinations. At one point, my trading system used more than 50 different indicators, from the classic RSI to exotic indicators of my own design. But do you know what I realized after another lost deposit? It is not about quantity, but about proper data handling.
+
+I remember an incident during Brexit: a system with dozens of indicators simply "froze" being unable to make a decision due to conflicting signals. That is when the idea for ETARE was born – a system that uses the minimum necessary set of indicators, but handles them in an intelligent way.
+
+def prepare_features(data: pd.DataFrame) -> pd.DataFrame:
+    """Prepare features for analysis"""
+    df = data.copy()
+
+    # RSI - as an overbought/oversold detector
+    delta = df['close'].diff()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
+    loss = -delta.where(delta < 0, 0).rolling(14).mean()
+    rs = gain / loss
+    df['rsi'] = 100 - (100 / (1 + rs))
+RSI in our system is not just an overbought/oversold indicator. We use it as part of a comprehensive analysis of market sentiment. It works especially effectively in combination with MACD:
+# MACD - to determine the trend
+    exp1 = df['close'].ewm(span=12, adjust=False).mean()
+    exp2 = df['close'].ewm(span=26, adjust=False).mean()
+    df['macd'] = exp1 - exp2
+    df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+    df['macd_hist'] = df['macd'] - df['macd_signal']
+Bollinger Bands are our volatility "radar".  
+
+# Bollinger Bands with adaptive period
+    volatility = df['close'].rolling(50).std()
+    adaptive_period = int(20 * (1 + volatility.mean()))
+    
+    df['bb_middle'] = df['close'].rolling(adaptive_period).mean()
+    df['bb_std'] = df['close'].rolling(adaptive_period).std()
+    df['bb_upper'] = df['bb_middle'] + 2 * df['bb_std']
+    df['bb_lower'] = df['bb_middle'] - 2 * df['bb_std']
+A separate story is the analysis of volatility and momentum. 
+
+# Momentum - market "temperature"
+    df['momentum'] = df['close'] / df['close'].shift(10)
+    df['momentum_ma'] = df['momentum'].rolling(20).mean()
+    df['momentum_std'] = df['momentum'].rolling(20).std()
+    
+    # Volatility is our "seismograph"
+    df['atr'] = df['high'].rolling(14).max() - df['low'].rolling(14).min()
+    df['price_change'] = df['close'].pct_change()
+    df['price_change_abs'] = df['price_change'].abs()
+    
+    # Volume volatility
+    df['volume_volatility'] = df['tick_volume'].rolling(20).std() / df['tick_volume'].rolling(20).mean()
+Volume analysis in ETARE is more than just tick counting. We have developed a dedicated algorithm for detecting abnormal volumes that helps predict strong movements:
+
+# Volume analysis - market "pulse"
+    df['volume_ma'] = df['tick_volume'].rolling(20).mean()
+    df['volume_std'] = df['tick_volume'].rolling(20).std()
+    df['volume_ratio'] = df['tick_volume'] / df['volume_ma']
+    
+    # Detection of abnormal volumes
+    df['volume_spike'] = (
+        df['tick_volume'] > df['volume_ma'] + 2 * df['volume_std']
+    ).astype(int)
+    
+    # Cluster analysis of volumes
+    df['volume_cluster'] = (
+        df['tick_volume'].rolling(3).sum() / 
+        df['tick_volume'].rolling(20).sum()
+    )
+The final touch is data normalization. This is a critical step that many people underestimate.
+
+# Normalization considering market phases
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        # Adaptive normalization
+        rolling_mean = df[col].rolling(100).mean()
+        rolling_std = df[col].rolling(100).std()
+        df[col] = (df[col] - rolling_mean) / (rolling_std + 1e-8)
+    
+    # Removing outliers
+    df = df.clip(-4, 4)  # Limit values to the range [-4, 4]
+    
+    return df
+Each indicator in ETARE is not just a number, but part of a complex mosaic of market analysis. The system constantly adapts to market changes, adjusting the weight of each indicator depending on the current situation. In the following sections, we will see how this data is translated into actual trading decisions.
+
+
+Trading Logic
+I present to you a description of an innovative trading system that embodies cutting-edge algorithmic trading technologies. The system is based on a hybrid approach that combines genetic optimization, machine learning, and advanced risk management.
+
+The heart of the system is a continuously operating trading loop that constantly analyzes market conditions and adapts to them. Like natural evolution, the system periodically "cleans" ineffective trading strategies, giving way to new, more promising approaches. This happens every 50 trades, ensuring continuous improvement of trading algorithms.
+
+Each trading instrument is handled individually, taking into account its unique characteristics. The system analyzes historical data for the last 100 candles, which allows it to form an accurate picture of the current market state. Based on this analysis, informed decisions are made about opening and closing positions.
+
+Particular attention is paid to the position averaging strategy (DCA). When opening new positions, the system automatically reduces their volume, starting from 0.1 lot and gradually decreasing to the minimum value of 0.01 lot. This allows for efficient management of risks and maximization of potential profits.
+
+The process of closing positions is also carefully thought out. The system monitors the profitability of each position and closes them when a specified profit level is reached. In this case, Buy and Sell positions are handled separately, which allows for more flexible portfolio management. The rewards or penalties received as a result of trading are the key to further successful learning. 
+
+All information about trading operations and system status is stored in the database, providing the ability to perform detailed analysis and optimize strategies. This creates a solid foundation for further improvement of trading algorithms.
+
+    def _process_individual(self, symbol: str, individual: TradingIndividual, current_state: np.ndarray):
+        """Handle trading logic for an individual using DCA and split closing by profit"""
+        try:
+            positions = individual.open_positions.get(symbol, [])
+
+            if not positions:  # Open a new position
+                action, _ = individual.predict(current_state)
+                if action in [Action.OPEN_BUY, Action.OPEN_SELL]:
+                    self._open_position(symbol, individual, action)
+            else:  # Manage existing positions
+                current_price = mt5.symbol_info_tick(symbol).bid
+
+                # Close positions by profit
+                self._close_positions_by_profit(symbol, individual, current_price)
+
+                # Check for the need to open a new position by DCA
+                if len(positions) < self.max_positions_per_pair:
+                    action, _ = individual.predict(current_state)
+                    if action in [Action.OPEN_BUY, Action.OPEN_SELL]:
+                        self._open_dca_position(symbol, individual, action, len(positions))
+
+        except Exception as e:
+            logging.error(f"Error processing individual: {str(e)}")
+
+    def _open_position(self, symbol: str, individual: TradingIndividual, action: Action):
+        """Open a position"""
+        try:
+            volume = 0.1
+            price = mt5.symbol_info_tick(symbol).ask if action == Action.OPEN_BUY else mt5.symbol_info_tick(symbol).bid
+
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": volume,
+                "type": mt5.ORDER_TYPE_BUY if action == Action.OPEN_BUY else mt5.ORDER_TYPE_SELL,
+                "price": price,
+                "deviation": 20,
+                "magic": 123456,
+                "comment": f"Gen{self.generation}",
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_FOK,
+            }
+
+            result = mt5.order_send(request)
+            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                trade = Trade(symbol=symbol, action=action, volume=volume,
+                              entry_price=result.price, entry_time=time.time())
+                if symbol not in individual.open_positions:
+                    individual.open_positions[symbol] = []
+                individual.open_positions[symbol].append(trade)
+
+        except Exception as e:
+            logging.error(f"Error opening position: {str(e)}")
+
+    def _open_dca_position(self, symbol: str, individual: TradingIndividual, action: Action, position_count: int):
+        """Open a position using the DCA strategy"""
+        try:
+            # Basic volume
+            base_volume = 0.1  # Initial volume in lots
+            # Reduce the volume by 0.01 lot for each subsequent position
+            volume = max(0.01, base_volume - (position_count * 0.01))  # Minimum volume of 0.01 lots
+            price = mt5.symbol_info_tick(symbol).ask if action == Action.OPEN_BUY else mt5.symbol_info_tick(symbol).bid
+
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": volume,
+                "type": mt5.ORDER_TYPE_BUY if action == Action.OPEN_BUY else mt5.ORDER_TYPE_SELL,
+                "price": price,
+                "deviation": 20,
+                "magic": 123456,
+                "comment": f"Gen{self.generation} DCA",
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_FOK,
+            }
+
+            result = mt5.order_send(request)
+            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                trade = Trade(symbol=symbol, action=action, volume=volume,
+                              entry_price=result.price, entry_time=time.time())
+                if symbol not in individual.open_positions:
+                    individual.open_positions[symbol] = []
+                individual.open_positions[symbol].append(trade)
+
+        except Exception as e:
+            logging.error(f"Error opening DCA position: {str(e)}")
+
+    def _close_positions_by_profit(self, symbol: str, individual: TradingIndividual, current_price: float):
+        """Close positions by profit separately for Buy and Sell"""
+        try:
+            positions = individual.open_positions.get(symbol, [])
+            buy_positions = [pos for pos in positions if pos.action == Action.OPEN_BUY]
+            sell_positions = [pos for pos in positions if pos.action == Action.OPEN_SELL]
+
+            # Close Buy positions
+            for position in buy_positions:
+                profit = calculate_profit(position, current_price)
+                if profit >= self.min_profit_pips:
+                    self._close_position(symbol, individual, position)
+
+            # Close Sell positions
+            for position in sell_positions:
+                profit = calculate_profit(position, current_price)
+                if profit >= self.min_profit_pips:
+                    self._close_position(symbol, individual, position)
+
+        except Exception as e:
+            logging.error(f"Error closing positions by profit: {str(e)}")
+
+    def _close_position(self, symbol: str, individual: TradingIndividual, position: Trade):
+        """Close a position with a model update"""
+        try:
+            close_type = mt5.ORDER_TYPE_SELL if position.action == Action.OPEN_BUY else mt5.ORDER_TYPE_BUY
+            price = mt5.symbol_info_tick(symbol).bid if close_type == mt5.ORDER_TYPE_SELL else mt5.symbol_info_tick(symbol).ask
+
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": position.volume,
+                "type": close_type,
+                "price": price,
+                "deviation": 20,
+                "magic": 123456,
+                "comment": "Close",
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_FOK,
+            }
+
+            result = mt5.order_send(request)
+            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                position.is_open = False
+                position.exit_price = result.price
+                position.exit_time = time.time()
+                position.profit = calculate_profit(position, result.price)
+                
+                # Generate data for training
+                trade_data = {
+                    'symbol': symbol,
+                    'action': position.action,
+                    'entry_price': position.entry_price,
+                    'exit_price': position.exit_price,
+                    'volume': position.volume,
+                    'profit': position.profit,
+                    'holding_time': position.exit_time - position.entry_time
+                }
+                
+                # Update the model with new data
+                individual.model.update(trade_data)
+                
+                # Save history and update open positions
+                individual.trade_history.append(position)
+                individual.open_positions[symbol].remove(position)
+                
+                # Log training results
+                logging.info(f"Model updated with trade data: {trade_data}")
+
+        except Exception as e:
+            logging.error(f"Error closing position: {str(e)}")
+
+def main():
+    symbols = ['EURUSD.ecn', 'GBPUSD.ecn', 'USDJPY.ecn', 'AUDUSD.ecn']
+    trader = HybridTrader(symbols)
+    trader.run_trading_cycle()
+
+if __name__ == "__main__":
+    main()
+
+The result is a reliable, self-learning trading system capable of operating efficiently in a variety of market conditions. The combination of evolutionary algorithms, machine learning, and proven trading strategies makes it a powerful tool for modern trading.
+
+
+Conclusion
+In conclusion, I would like to emphasize that ETARE is not just another trading algorithm, but the result of many years of evolution in algorithmic trading. The system combines best practices from various fields: genetic algorithms for adaptation to changing market conditions, deep learning for decision-making, and classical risk management methods.
+
+ETARE's uniqueness lies in its ability to continuously learn from its own experiences. Every trade, regardless of outcome, becomes part of the system's collective memory, helping to improve future trading decisions. The mechanism of natural selection of trading strategies, inspired by Darwin's theory of evolution, ensures the survival of only the most effective approaches.
+
+During development and testing, the system has proven its resilience in a variety of market conditions, from calm trend movements to highly volatile periods. It is especially important to note the efficiency of the DCA strategy and the mechanism of separate position closing, which allow us to maximize profits while controlling the level of risk.
+
+Now, regarding efficiency. I will say it straight out: the main ETARE module itself does not trade for me. It is integrated, as a module, into the wider Midas trading ecosystem.
+
+
+
+There are currently 24 modules in Midas, including this one. The complexity will increase steadily, and I will describe a lot of it in future articles. 
+
+
+
+The future of algorithmic trading lies precisely in such adaptive systems, capable of evolving with the market. ETARE is a step in this direction, demonstrating how modern technologies can be applied to create reliable and profitable trading solutions.
+
+Translated from Russian by MetaQuotes Ltd.
+Original article: https://www.mql5.com/ru/articles/16971
+
+Attached files | Download ZIP
+ETARE_module.py (34.39 KB)

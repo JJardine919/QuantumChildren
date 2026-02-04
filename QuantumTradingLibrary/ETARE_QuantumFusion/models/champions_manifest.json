@@ -1,0 +1,55 @@
+{
+  "exported_at": "2026-01-22T20:11:50.238790",
+  "source_db": "etare_redux_v2.db",
+  "top_n": 1,
+  "champions": {
+    "EURUSD": [
+      {
+        "filename": "champion_EURUSD.pth",
+        "rank": 1,
+        "original_index": 0,
+        "fitness": 0.049605688295923364,
+        "total_profit": 7440.853244388505,
+        "input_size": 8,
+        "hidden_size": 128,
+        "verified": true
+      }
+    ],
+    "NZDCHF": [
+      {
+        "filename": "champion_NZDCHF.pth",
+        "rank": 1,
+        "original_index": 0,
+        "fitness": 0.07980184379265956,
+        "total_profit": 798.0184379265957,
+        "input_size": 8,
+        "hidden_size": 128,
+        "verified": true
+      }
+    ],
+    "GBPUSD": [
+      {
+        "filename": "champion_GBPUSD.pth",
+        "rank": 1,
+        "original_index": 0,
+        "fitness": 0.023748789482596233,
+        "total_profit": 1424.927368955774,
+        "input_size": 8,
+        "hidden_size": 128,
+        "verified": true
+      }
+    ],
+    "GBPCHF": [
+      {
+        "filename": "champion_GBPCHF.pth",
+        "rank": 1,
+        "original_index": 0,
+        "fitness": 0.05988662728695696,
+        "total_profit": 3593.1976372174177,
+        "input_size": 8,
+        "hidden_size": 128,
+        "verified": true
+      }
+    ]
+  }
+}

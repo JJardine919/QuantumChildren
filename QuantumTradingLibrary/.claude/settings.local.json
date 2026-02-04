@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell:*)",
+      "Bash(python:*)",
+      "Bash(dir \"C:\\\\Users\\\\jjj10\\\\QuantumTradingLibrary\" /b)",
+      "Bash(dir /s /b \"C:\\\\Users\\\\jjj10\\\\QuantumTradingLibrary\\\\01_Systems\")",
+      "Bash(findstr:*)",
+      "Bash(ping:*)"
+    ]
+  }
+}

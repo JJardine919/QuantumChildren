@@ -1,0 +1,4 @@
+# Blue Guardian Archiver - Python Dependencies
+
+# Core (minimal)
+numpy>=1.21.0

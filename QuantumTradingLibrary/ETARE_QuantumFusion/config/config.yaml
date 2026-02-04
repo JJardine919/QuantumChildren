@@ -1,0 +1,21 @@
+system:
+  name: "Strike Boss Fusion"
+  version: "0.1.0-alpha"
+  mode: "development"
+
+compression:
+  fid_threshold: 0.95
+  max_layers: 5
+  input_qubits: 8
+
+fusion:
+  weights:
+    etare_expert: 0.60
+    quantum_lstm: 0.15
+    quantum_3d: 0.15
+    qpe_analysis: 0.10
+
+symbols:
+  - "BTCUSD"
+  - "EURUSD"
+  - "GBPUSD"

@@ -1,0 +1,518 @@
+{
+  "exported_at": "2026-01-29T23:07:50.998443",
+  "source_db": "etare_redux_v2.db",
+  "description": "Top 50 strongest experts across all symbols by fitness",
+  "experts": [
+    {
+      "rank": 0,
+      "symbol": "BTCUSD",
+      "filename": "expert_BTCUSD_special.pth",
+      "fitness": 0.15,
+      "total_profit": 20000.0,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true,
+      "note": "BTCUSD special expert added 2026-01-30"
+    },
+    {
+      "rank": 1,
+      "symbol": "AUDNZD",
+      "filename": "expert_rank01_AUDNZD.pth",
+      "fitness": 0.2707186228173445,
+      "total_profit": 1353.5931140867224,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 2,
+      "symbol": "AUDNZD",
+      "filename": "expert_rank02_AUDNZD.pth",
+      "fitness": 0.2703302896167072,
+      "total_profit": 1351.6514480835358,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 3,
+      "symbol": "AUDNZD",
+      "filename": "expert_rank03_AUDNZD.pth",
+      "fitness": 0.2696661944228372,
+      "total_profit": 1348.330972114186,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 4,
+      "symbol": "AUDNZD",
+      "filename": "expert_rank04_AUDNZD.pth",
+      "fitness": 0.2679177660835794,
+      "total_profit": 1339.588830417897,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 5,
+      "symbol": "AUDNZD",
+      "filename": "expert_rank05_AUDNZD.pth",
+      "fitness": 0.2610308793736866,
+      "total_profit": 1305.1543968684327,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 6,
+      "symbol": "AUDNZD",
+      "filename": "expert_rank06_AUDNZD.pth",
+      "fitness": 0.25807936369813833,
+      "total_profit": 1290.3968184906917,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 7,
+      "symbol": "AUDNZD",
+      "filename": "expert_rank07_AUDNZD.pth",
+      "fitness": 0.25550850713175005,
+      "total_profit": 1277.5425356587502,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 8,
+      "symbol": "AUDNZD",
+      "filename": "expert_rank08_AUDNZD.pth",
+      "fitness": 0.2548396842447099,
+      "total_profit": 1274.1984212235493,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 9,
+      "symbol": "AUDNZD",
+      "filename": "expert_rank09_AUDNZD.pth",
+      "fitness": 0.2536906337442579,
+      "total_profit": 1268.4531687212893,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 10,
+      "symbol": "AUDNZD",
+      "filename": "expert_rank10_AUDNZD.pth",
+      "fitness": 0.2495099317643786,
+      "total_profit": 1247.549658821893,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 11,
+      "symbol": "XAUUSD",
+      "filename": "expert_rank11_XAUUSD.pth",
+      "fitness": 0.20460507135703598,
+      "total_profit": 30690.760703555396,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 12,
+      "symbol": "XAUUSD",
+      "filename": "expert_rank12_XAUUSD.pth",
+      "fitness": 0.19209491198807316,
+      "total_profit": 28814.23679821097,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 13,
+      "symbol": "XAUUSD",
+      "filename": "expert_rank13_XAUUSD.pth",
+      "fitness": 0.18846569660888093,
+      "total_profit": 28269.85449133214,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 14,
+      "symbol": "XAUUSD",
+      "filename": "expert_rank14_XAUUSD.pth",
+      "fitness": 0.18392264403680572,
+      "total_profit": 27588.39660552086,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 15,
+      "symbol": "XAUUSD",
+      "filename": "expert_rank15_XAUUSD.pth",
+      "fitness": 0.18237171316953105,
+      "total_profit": 27355.756975429656,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 16,
+      "symbol": "XAUUSD",
+      "filename": "expert_rank16_XAUUSD.pth",
+      "fitness": 0.17782808191592359,
+      "total_profit": 26674.21228738854,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 17,
+      "symbol": "XAUUSD",
+      "filename": "expert_rank17_XAUUSD.pth",
+      "fitness": 0.17694149347420957,
+      "total_profit": 26541.224021131435,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 18,
+      "symbol": "XAUUSD",
+      "filename": "expert_rank18_XAUUSD.pth",
+      "fitness": 0.17691019807913536,
+      "total_profit": 26536.529711870302,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 19,
+      "symbol": "XAUUSD",
+      "filename": "expert_rank19_XAUUSD.pth",
+      "fitness": 0.17550903497705295,
+      "total_profit": 26326.35524655794,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 20,
+      "symbol": "XAUUSD",
+      "filename": "expert_rank20_XAUUSD.pth",
+      "fitness": 0.17277954202006124,
+      "total_profit": 25916.931303009187,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 21,
+      "symbol": "ETHUSD",
+      "filename": "expert_rank21_ETHUSD.pth",
+      "fitness": 0.1105455133602129,
+      "total_profit": 65749.29501554862,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 22,
+      "symbol": "ETHUSD",
+      "filename": "expert_rank22_ETHUSD.pth",
+      "fitness": 0.0910386817851651,
+      "total_profit": 49556.07071400396,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 23,
+      "symbol": "ETHUSD",
+      "filename": "expert_rank23_ETHUSD.pth",
+      "fitness": 0.08916839530858256,
+      "total_profit": 53263.51900031275,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 24,
+      "symbol": "ETHUSD",
+      "filename": "expert_rank24_ETHUSD.pth",
+      "fitness": 0.08506417257789053,
+      "total_profit": 48421.58584084679,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 25,
+      "symbol": "ETHUSD",
+      "filename": "expert_rank25_ETHUSD.pth",
+      "fitness": 0.08365486792754628,
+      "total_profit": 49296.63662389296,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 26,
+      "symbol": "EURCAD",
+      "filename": "expert_rank26_EURCAD.pth",
+      "fitness": 0.07699729597199076,
+      "total_profit": 384.98647985995376,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 27,
+      "symbol": "GBPUSD",
+      "filename": "expert_rank27_GBPUSD.pth",
+      "fitness": 0.07022332986684614,
+      "total_profit": 10533.49948002692,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 28,
+      "symbol": "EURCAD",
+      "filename": "expert_rank28_EURCAD.pth",
+      "fitness": 0.07015753955589571,
+      "total_profit": 350.78769777947855,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 29,
+      "symbol": "GBPUSD",
+      "filename": "expert_rank29_GBPUSD.pth",
+      "fitness": 0.07013761304022938,
+      "total_profit": 10520.641956034407,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 30,
+      "symbol": "EURCAD",
+      "filename": "expert_rank30_EURCAD.pth",
+      "fitness": 0.0701158230221161,
+      "total_profit": 350.57911511058046,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 31,
+      "symbol": "EURCAD",
+      "filename": "expert_rank31_EURCAD.pth",
+      "fitness": 0.06994612945965892,
+      "total_profit": 349.73064729829457,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 32,
+      "symbol": "ETHUSD",
+      "filename": "expert_rank32_ETHUSD.pth",
+      "fitness": 0.06978805621663418,
+      "total_profit": 37759.40214894057,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 33,
+      "symbol": "ETHUSD",
+      "filename": "expert_rank33_ETHUSD.pth",
+      "fitness": 0.06933273687076372,
+      "total_profit": 48120.180644975975,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 34,
+      "symbol": "GBPUSD",
+      "filename": "expert_rank34_GBPUSD.pth",
+      "fitness": 0.06907919867041114,
+      "total_profit": 10361.87980056167,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 35,
+      "symbol": "ETHUSD",
+      "filename": "expert_rank35_ETHUSD.pth",
+      "fitness": 0.06856369880654245,
+      "total_profit": 39137.411794002284,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 36,
+      "symbol": "EURCAD",
+      "filename": "expert_rank36_EURCAD.pth",
+      "fitness": 0.06843093651983254,
+      "total_profit": 342.1546825991627,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 37,
+      "symbol": "EURCAD",
+      "filename": "expert_rank37_EURCAD.pth",
+      "fitness": 0.06827393796003525,
+      "total_profit": 341.3696898001763,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 38,
+      "symbol": "EURCAD",
+      "filename": "expert_rank38_EURCAD.pth",
+      "fitness": 0.06796868800184838,
+      "total_profit": 339.84344000924193,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 39,
+      "symbol": "EURCAD",
+      "filename": "expert_rank39_EURCAD.pth",
+      "fitness": 0.0678935281856764,
+      "total_profit": 339.467640928382,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 40,
+      "symbol": "EURNZD",
+      "filename": "expert_rank40_EURNZD.pth",
+      "fitness": 0.06777952561218388,
+      "total_profit": 10166.928841827583,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 41,
+      "symbol": "EURCAD",
+      "filename": "expert_rank41_EURCAD.pth",
+      "fitness": 0.06756753233412165,
+      "total_profit": 337.8376616706082,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 42,
+      "symbol": "GBPUSD",
+      "filename": "expert_rank42_GBPUSD.pth",
+      "fitness": 0.06754489906962709,
+      "total_profit": 10131.734860444063,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 43,
+      "symbol": "ETHUSD",
+      "filename": "expert_rank43_ETHUSD.pth",
+      "fitness": 0.06622688359793925,
+      "total_profit": 39219.522908920655,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 44,
+      "symbol": "ETHUSD",
+      "filename": "expert_rank44_ETHUSD.pth",
+      "fitness": 0.06604156647806307,
+      "total_profit": 37615.030755659565,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 45,
+      "symbol": "GBPUSD",
+      "filename": "expert_rank45_GBPUSD.pth",
+      "fitness": 0.06567039645651278,
+      "total_profit": 9850.559468476917,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 46,
+      "symbol": "EURCAD",
+      "filename": "expert_rank46_EURCAD.pth",
+      "fitness": 0.06419235155797305,
+      "total_profit": 320.96175778986526,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 47,
+      "symbol": "GBPUSD",
+      "filename": "expert_rank47_GBPUSD.pth",
+      "fitness": 0.0629184287269493,
+      "total_profit": 9437.764309042395,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 48,
+      "symbol": "GBPUSD",
+      "filename": "expert_rank48_GBPUSD.pth",
+      "fitness": 0.06236571324455649,
+      "total_profit": 9354.856986683473,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 49,
+      "symbol": "GBPUSD",
+      "filename": "expert_rank49_GBPUSD.pth",
+      "fitness": 0.0621255706965316,
+      "total_profit": 9318.83560447974,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    },
+    {
+      "rank": 50,
+      "symbol": "NZDCHF",
+      "filename": "expert_rank50_NZDCHF.pth",
+      "fitness": 0.062057889724568466,
+      "total_profit": 7757.236215571058,
+      "input_size": 8,
+      "hidden_size": 128,
+      "verified": true
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+# Blue Guardian Brain - Docker Image
+# ETARE + Quantum Compression + LLM Watchdog
+
+FROM python:3.10-slim
+
+LABEL maintainer="Quantum Library"
+LABEL version="2.0"
+LABEL description="Blue Guardian Integrated Trading Brain"
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for caching
+COPY requirements_brain.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements_brain.txt
+
+# Copy application files
+COPY bg_brain_integrated.py .
+COPY archiver_service.py .
+COPY llm_watchdog.py .
+
+# Create directories
+RUN mkdir -p /app/data /app/logs /app/models /app/signals /app/archive
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1
+ENV SIGNAL_INTERVAL=30
+
+# Health check
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import json; print('OK')" || exit 1
+
+# Run the brain
+CMD ["python", "bg_brain_integrated.py", "--interval", "${SIGNAL_INTERVAL:-30}"]

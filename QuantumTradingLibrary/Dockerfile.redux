@@ -1,0 +1,37 @@
+# ETARE Redux Brain Container
+# ============================
+# Uses trained LSTM champions for signal generation
+#
+# Build: docker build -f Dockerfile.redux -t quantum-brain-redux .
+# Run:   docker run -d --name quantum-brain-redux -v /path/to/mt5/files:/mt5files quantum-brain-redux
+
+FROM python:3.10-slim
+
+# Install system tools
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements and install
+COPY requirements.txt .
+# Remove Windows-only libraries and install dependencies
+RUN sed -i '/MetaTrader5/d' requirements.txt && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir torch numpy pandas
+
+# Copy the code
+COPY 01_Systems ./01_Systems
+COPY 06_Integration ./06_Integration
+
+# Copy the trained champions
+COPY champions ./champions
+
+# Set environment
+ENV PYTHONPATH=/app
+ENV CHAMPIONS_DIR=/app/champions
+
+# Run the Redux signal generator
+CMD ["python", "06_Integration/HybridBridge/etare_signal_generator_redux.py"]

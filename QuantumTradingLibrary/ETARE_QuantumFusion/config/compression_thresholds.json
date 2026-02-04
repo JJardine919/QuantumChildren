@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "thresholds": {
+    "aggressive": 0.5,
+    "defensive": 0.8,
+    "min_qubits": 1,
+    "fidelity_threshold": 0.90,
+    "max_iterations": 5
+  },
+  "position_multipliers": {
+    "highly_compressible": 1.5,
+    "moderately_compressible": 1.0,
+    "incompressible": 0.5
+  }
+}

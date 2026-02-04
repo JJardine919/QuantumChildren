@@ -1,0 +1,78 @@
+# Blue Guardian Integrated System - Docker Compose
+# ETARE + Quantum Compression + LLM Watchdog
+# Version 2.0
+
+version: '3.8'
+
+services:
+  # Main trading brain with ETARE, Quantum, and LLM Watchdog
+  bg-brain:
+    build:
+      context: .
+      dockerfile: Dockerfile.brain
+    container_name: bg_brain_integrated
+    restart: unless-stopped
+    volumes:
+      - ./accounts_config.json:/app/accounts_config.json:ro
+      - ./models:/app/models:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - bg_signals:/app/signals
+      - bg_archive:/app/archive
+    environment:
+      - PYTHONUNBUFFERED=1
+      - SIGNAL_INTERVAL=30
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
+      - LLM_MODEL=${LLM_MODEL:-gemma2:2b}
+    networks:
+      - bg_network
+    depends_on:
+      - ollama
+
+  # Ollama LLM server for watchdog
+  ollama:
+    image: ollama/ollama:latest
+    container_name: bg_ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    networks:
+      - bg_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Comment out GPU section if no GPU available
+
+  # Archiver service for quantum features
+  archiver:
+    build:
+      context: .
+      dockerfile: Dockerfile.archiver
+    container_name: bg_archiver
+    restart: unless-stopped
+    volumes:
+      - bg_archive:/app/archive
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CLEANUP_INTERVAL_HOURS=24
+      - RETENTION_DAYS=90
+    networks:
+      - bg_network
+
+networks:
+  bg_network:
+    driver: bridge
+
+volumes:
+  bg_signals:
+  bg_archive:
+  ollama_models:

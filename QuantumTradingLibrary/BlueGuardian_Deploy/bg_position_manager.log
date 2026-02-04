@@ -1,0 +1,6 @@
+2026-02-02 17:15:07,246 | POSITION_MGR | Loaded 3 accounts
+2026-02-02 17:15:07,286 | POSITION_MGR | Connected to MT5: Account 212000584
+2026-02-02 17:15:07,287 | POSITION_MGR | Managing positions for magic numbers: [366001, 365001, 212001]
+2026-02-02 17:17:49,115 | POSITION_MGR | Loaded 3 accounts
+2026-02-02 17:17:49,129 | POSITION_MGR | Connected to MT5: Account 212000584
+2026-02-02 17:17:49,129 | POSITION_MGR | Managing positions for magic numbers: [366001, 365001, 212001]

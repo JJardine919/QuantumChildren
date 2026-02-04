@@ -1,0 +1,162 @@
+{
+  "accounts": [
+    {
+      "name": "BG_COMPETITION",
+      "account_id": "366592",
+      "password": "CHECK_BG_DASHBOARD",
+      "server": "BlueGuardian-Server",
+      "type": "competition",
+      "magic_number": 366592,
+      "symbol": "BTCUSD",
+      "timeframe": "M1",
+      "max_lot_size": 1.0,
+      "base_lot_size": 0.50,
+      "daily_drawdown_pct": 100.0,
+      "max_drawdown_pct": 100.0,
+      "profit_target_pct": 100.0,
+      "enabled": true,
+      "brain_mode": "aggressive_competition",
+      "notes": "COMPETITION - Trading DISABLED by server as of 2026-02-03. Check with Blue Guardian if competition ended.",
+      "status": "SERVER_DISABLED",
+      "grid_config": {
+        "experts": ["bullish", "bearish"],
+        "max_orders_per_expert": 20,
+        "max_total_orders": 20,
+        "regime_confidence_threshold": 0.30,
+        "compression_boost": 0,
+        "grid_spacing_points": 200,
+        "tp_points": 300,
+        "hidden_sl_tp": false
+      },
+      "risk_config": {
+        "reward_ratio": 1.5,
+        "ignore_drawdown": true,
+        "scale_on_wins": true,
+        "win_scale_factor": 1.2
+      }
+    },
+    {
+      "name": "BG_5K_INSTANT",
+      "account_id": "366604",
+      "password": "YF^oHH&4Nm",
+      "server": "BlueGuardian-Server",
+      "type": "instant_challenge",
+      "magic_number": 366001,
+      "symbol": "BTCUSD",
+      "timeframe": "M1",
+      "max_lot_size": 0.07,
+      "base_lot_size": 0.06,
+      "daily_drawdown_pct": 5.0,
+      "max_drawdown_pct": 10.0,
+      "profit_target_pct": 10.0,
+      "enabled": true,
+      "brain_mode": "atlas_grid_style",
+      "grid_config": {
+        "experts": ["bullish"],
+        "max_orders_per_expert": 5,
+        "max_total_orders": 5,
+        "regime_confidence_threshold": 0.80,
+        "compression_boost": 12,
+        "grid_spacing_points": 100,
+        "tp_points": 450,
+        "hidden_sl_tp": true
+      },
+      "risk_config": {
+        "reward_ratio": 3.0,
+        "sl_atr_multiplier": 1.5,
+        "tp_points_fixed": 450,
+        "partial_take_profit": 0.5,
+        "hidden_sl_tp": true,
+        "dynamic_atr_levels": true,
+        "trailing_stop": true,
+        "breakeven_move": true
+      }
+    },
+    {
+      "name": "BG_100K_CHALLENGE",
+      "account_id": "365060",
+      "password": ")8xaE(gAuU",
+      "server": "BlueGuardian-Server",
+      "type": "challenge",
+      "magic_number": 365001,
+      "symbol": "BTCUSD",
+      "timeframe": "M1",
+      "max_lot_size": 0.07,
+      "base_lot_size": 0.06,
+      "daily_drawdown_pct": 5.0,
+      "max_drawdown_pct": 10.0,
+      "profit_target_pct": 10.0,
+      "enabled": true,
+      "brain_mode": "atlas_grid_style",
+      "grid_config": {
+        "experts": ["bullish"],
+        "max_orders_per_expert": 5,
+        "max_total_orders": 5,
+        "regime_confidence_threshold": 0.80,
+        "compression_boost": 12,
+        "grid_spacing_points": 100,
+        "tp_points": 450,
+        "hidden_sl_tp": true
+      },
+      "risk_config": {
+        "reward_ratio": 3.0,
+        "sl_atr_multiplier": 1.5,
+        "tp_points_fixed": 450,
+        "partial_take_profit": 0.5,
+        "hidden_sl_tp": true,
+        "dynamic_atr_levels": true,
+        "trailing_stop": true,
+        "breakeven_move": true
+      }
+    },
+    {
+      "name": "ATLAS_300K_GRID",
+      "account_id": "212000584",
+      "password": "M6NLk79MN@",
+      "server": "AtlasFunded-Server",
+      "type": "challenge",
+      "magic_number": 212001,
+      "symbol": "BTCUSD",
+      "timeframe": "M1",
+      "max_lot_size": 0.07,
+      "base_lot_size": 0.06,
+      "daily_drawdown_pct": 5.0,
+      "max_drawdown_pct": 10.0,
+      "profit_target_pct": 10.0,
+      "enabled": true,
+      "brain_mode": "atlas_grid_style",
+      "grid_config": {
+        "experts": ["bullish"],
+        "max_orders_per_expert": 5,
+        "max_total_orders": 5,
+        "regime_confidence_threshold": 0.80,
+        "compression_boost": 12,
+        "grid_spacing_points": 100,
+        "tp_points": 450,
+        "hidden_sl_tp": true
+      },
+      "risk_config": {
+        "reward_ratio": 3.0,
+        "sl_atr_multiplier": 1.5,
+        "tp_points_fixed": 450,
+        "partial_take_profit": 0.5,
+        "hidden_sl_tp": true,
+        "dynamic_atr_levels": true,
+        "trailing_stop": true,
+        "breakeven_move": true
+      }
+    }
+  ],
+  "vps": {
+    "host": "NAMECHEAP_VPS_IP",
+    "user": "root",
+    "password": "NAMECHEAP_VPS_PASSWORD",
+    "remote_base": "/opt/blueguardian"
+  },
+  "trading": {
+    "risk_mode": "atlas_style",
+    "min_confidence": 0.55,
+    "max_trades_per_day": 10,
+    "check_interval_seconds": 5
+  }
+}

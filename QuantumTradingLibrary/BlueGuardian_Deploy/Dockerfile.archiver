@@ -1,0 +1,38 @@
+# Blue Guardian Archiver Service - Docker Image
+
+FROM python:3.10-slim
+
+LABEL maintainer="Quantum Library"
+LABEL version="2.0"
+LABEL description="Blue Guardian Quantum Feature Archiver"
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements_archiver.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements_archiver.txt
+
+# Copy application
+COPY archiver_service.py .
+
+# Create directories
+RUN mkdir -p /app/archive /app/logs
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1
+ENV CLEANUP_INTERVAL_HOURS=24
+ENV RETENTION_DAYS=90
+
+# Health check
+HEALTHCHECK --interval=120s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "from archiver_service import get_archiver; a=get_archiver(); print(a.get_stats())" || exit 1
+
+# Run archiver service
+CMD ["python", "-c", "from archiver_service import get_archiver, ArchiverService; a=get_archiver('/app/archive/quantum_archive.db'); s=ArchiverService(a); s.start(); import time; time.sleep(999999)"]

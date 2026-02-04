@@ -1,0 +1,24 @@
+{
+  "version": "1.0",
+  "modules": {
+    "compression_layer": true,
+    "quantum_lstm": true,
+    "quantum_3d": true,
+    "qpe_analysis": true,
+    "volatility_filter": true,
+    "currency_strength": true,
+    "fusion_engine": true
+  },
+  "safety": {
+    "fallback_to_champion": true,
+    "emergency_stop_enabled": true,
+    "max_drawdown_percent": 10,
+    "max_consecutive_losses": 5,
+    "min_module_accuracy": 0.60
+  },
+  "execution": {
+    "max_lot_size": 0.1,
+    "max_concurrent_orders": 10,
+    "max_daily_trades": 20
+  }
+}

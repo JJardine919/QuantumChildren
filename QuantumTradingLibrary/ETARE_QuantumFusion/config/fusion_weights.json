@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-01-23",
+  "weights": {
+    "compression_ratio": 0.25,
+    "quantum_lstm": 0.20,
+    "quantum_3d": 0.15,
+    "qpe_horizon": 0.15,
+    "volatility": 0.10,
+    "currency_strength": 0.05,
+    "etare_base": 0.10
+  },
+  "notes": "Initial weights based on theoretical importance. Optimize during Phase 4."
+}

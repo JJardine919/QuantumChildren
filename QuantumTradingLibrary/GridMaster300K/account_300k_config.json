@@ -1,0 +1,91 @@
+{
+  "account_name": "PROP_300K_CHALLENGE",
+  "description": "300K Prop Firm Challenge - Conservative Grid Trading with 3 Regime Experts",
+  "account_balance": 300000,
+  "payout_on_pass": 2500,
+  "challenge_rules": {
+    "profit_target_pct": 10.0,
+    "daily_drawdown_limit_pct": 5.0,
+    "max_drawdown_limit_pct": 10.0,
+    "min_trading_days": 0,
+    "max_trading_days": null,
+    "notes": "Conservative approach - user prefers handcuffed risk"
+  },
+  "risk_management": {
+    "mode": "CONSERVATIVE_HANDCUFF",
+    "reward_ratio": 3.0,
+    "sl_atr_multiplier": 1.5,
+    "tp_atr_multiplier": 3.0,
+    "partial_tp_ratio": 0.5,
+    "partial_tp_at_first_target": true,
+    "dynamic_hidden_sltp": true,
+    "hidden_sl_tp_note": "ATR multipliers hardcoded, actual values calculated dynamically per trade - not shown in order category",
+    "trailing_stop_enabled": true,
+    "breakeven_move_enabled": true,
+    "max_concurrent_orders": 30,
+    "max_orders_per_expert": 10,
+    "risk_per_grid_pct": 0.15,
+    "max_daily_risk_pct": 2.0
+  },
+  "experts": {
+    "BEARISH": {
+      "expert_id": "GRID_EXPERT_BEARISH",
+      "expert_file": "GridExpert_Bearish.mq5",
+      "magic_number": 300001,
+      "compression_boost": 12,
+      "regime_filter": "BEARISH",
+      "confidence_threshold": 0.80,
+      "direction": "SELL",
+      "enabled": true,
+      "description": "Specialized for bearish trending markets - only opens SELL grid positions"
+    },
+    "BULLISH": {
+      "expert_id": "GRID_EXPERT_BULLISH",
+      "expert_file": "GridExpert_Bullish.mq5",
+      "magic_number": 300002,
+      "compression_boost": 12,
+      "regime_filter": "BULLISH",
+      "confidence_threshold": 0.80,
+      "direction": "BUY",
+      "enabled": true,
+      "description": "Specialized for bullish trending markets - only opens BUY grid positions"
+    },
+    "NEUTRAL": {
+      "expert_id": "GRID_EXPERT_NEUTRAL",
+      "expert_file": "GridExpert_Neutral.mq5",
+      "magic_number": 300003,
+      "compression_boost": 12,
+      "regime_filter": "NEUTRAL",
+      "confidence_threshold": 0.80,
+      "direction": "BOTH",
+      "enabled": true,
+      "description": "Specialized for ranging/neutral markets - opens grid in both directions"
+    }
+  },
+  "grid_settings": {
+    "grid_style": "TRUE_GRID",
+    "max_grid_levels": 10,
+    "grid_spacing_atr_multiplier": 0.5,
+    "grid_spacing_mode": "ATR_DYNAMIC",
+    "martingale_enabled": false,
+    "averaging_enabled": false,
+    "scale_in_on_pullback": true,
+    "close_opposite_on_signal": false,
+    "use_pending_orders": true
+  },
+  "compression_filter": {
+    "enabled": true,
+    "confidence_threshold": 0.80,
+    "boost_per_expert": 12,
+    "total_boost_active": 36,
+    "min_regime_alignment": 0.80,
+    "description": "Only trade when 80%+ confident about regime match"
+  },
+  "symbols": ["BTCUSD", "ETHUSD", "XAUUSD"],
+  "timeframe": "M5",
+  "atr_period": 14,
+  "check_interval_seconds": 30,
+  "created_at": "2026-02-02",
+  "updated_at": "2026-02-02",
+  "version": "2.0.0"
+}

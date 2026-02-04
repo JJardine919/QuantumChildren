@@ -1,0 +1,279 @@
+================================================================================
+GETLEVERAGED MULTI-SYMBOL GRID TRADING SYSTEM - DEPLOYMENT GUIDE
+================================================================================
+
+OVERVIEW
+--------
+This system provides entropy-filtered grid trading for XAUUSD, BTCUSD, and
+ETHUSD across all 3 GetLeveraged accounts with LLM-driven dynamic SL/TP.
+
+FILES INCLUDED
+--------------
+1. EntropyGridCore.mqh        - Shared grid logic with entropy filtering
+2. XAUUSD_GridTrader.mq5      - Gold-specific EA
+3. BTCUSD_GridTrader.mq5      - Bitcoin-specific EA
+4. ETHUSD_GridTrader.mq5      - Ethereum-specific EA
+5. MultiSymbol_Launcher.mq5   - Combined launcher for all 3 symbols
+6. llm_sltp_optimizer.py      - LLM dynamic SL/TP optimizer
+7. START_GETLEVERAGED_GRIDS.bat - Quick launcher script
+
+================================================================================
+ACCOUNTS
+================================================================================
+Account 1: 113328 / GetLeveraged-Trade
+Account 2: 113326 / GetLeveraged-Trade
+Account 3: 107245 / GetLeveraged-Trade
+
+================================================================================
+MAGIC NUMBER SCHEME
+================================================================================
+To avoid conflicts, each symbol uses a different base magic number:
+
+XAUUSD: 112xxx (112001, 112002, 112003 for accounts 1, 2, 3)
+BTCUSD: 113xxx (113001, 113002, 113003 for accounts 1, 2, 3)
+ETHUSD: 114xxx (114001, 114002, 114003 for accounts 1, 2, 3)
+
+================================================================================
+SYSTEM SPECIFICATIONS (HARD-CODED)
+================================================================================
+These are fixed across all symbols per your requirements:
+
+ENTROPY FILTERING:
+  - Enabled: YES
+  - Confidence Threshold: 80%
+  - Compression Boost: +12
+  - Trades ONLY in low entropy (predictable) market conditions
+
+ATR-BASED LEVELS:
+  - Stop Loss: 1.5x ATR
+  - Take Profit: 3.0x ATR (provides 3:1 reward-to-risk ratio)
+
+PARTIAL TAKE PROFIT:
+  - 50% of position closed at first target (1.5x ATR profit)
+
+BREAK-EVEN:
+  - Triggered at 30% of TP distance
+  - SL moved to entry + small buffer
+
+TRAILING STOP:
+  - Starts at 50% of TP distance
+  - Trails at 1x ATR behind price
+
+HIDDEN SL/TP:
+  - All stops managed internally
+  - Broker sees NO stop loss or take profit orders
+  - Prevents stop hunting
+
+================================================================================
+DEPLOYMENT OPTIONS
+================================================================================
+
+OPTION A: MULTI-SYMBOL LAUNCHER (RECOMMENDED)
+---------------------------------------------
+Use MultiSymbol_Launcher.mq5 to run all 3 symbols from a single EA.
+
+1. Copy all files to: MQL5\Experts\GetLeveraged_Grid\
+2. Compile MultiSymbol_Launcher.mq5 (will auto-compile EntropyGridCore.mqh)
+3. Attach to ANY chart (symbol doesn't matter)
+4. Configure inputs:
+   - InpAccountSelector: 1, 2, or 3 (select which account)
+   - InpTradeXAUUSD: true/false
+   - InpTradeBTCUSD: true/false
+   - InpTradeETHUSD: true/false
+   - Lot sizes per symbol
+5. Enable "Allow Algo Trading" in MT5
+
+OPTION B: SEPARATE EAs PER SYMBOL
+---------------------------------
+For more granular control, run each symbol's EA separately.
+
+1. Copy all files to: MQL5\Experts\GetLeveraged_Grid\
+2. Compile each EA
+3. Attach XAUUSD_GridTrader to XAUUSD chart
+4. Attach BTCUSD_GridTrader to BTCUSD chart
+5. Attach ETHUSD_GridTrader to ETHUSD chart
+6. Set InpAccountSelector for each EA based on the account logged in
+
+================================================================================
+DEPLOYMENT TO ALL 3 ACCOUNTS
+================================================================================
+
+For complete 3-account deployment:
+
+ACCOUNT 113328 (Account Selector = 1):
+  - Login to MT5 with account 113328
+  - Attach MultiSymbol_Launcher with InpAccountSelector = 1
+  OR
+  - Attach each symbol EA with InpAccountSelector = 1
+
+ACCOUNT 113326 (Account Selector = 2):
+  - Login to MT5 with account 113326
+  - Attach MultiSymbol_Launcher with InpAccountSelector = 2
+  OR
+  - Attach each symbol EA with InpAccountSelector = 2
+
+ACCOUNT 107245 (Account Selector = 3):
+  - Login to MT5 with account 107245
+  - Attach MultiSymbol_Launcher with InpAccountSelector = 3
+  OR
+  - Attach each symbol EA with InpAccountSelector = 3
+
+================================================================================
+RECOMMENDED LOT SIZES
+================================================================================
+Based on typical account sizes for GetLeveraged:
+
+XAUUSD (Gold):
+  - Base: 0.01 lots
+  - Max: 0.05 lots
+  - Note: Gold has high volatility, keep lots smaller
+
+BTCUSD (Bitcoin):
+  - Base: 0.01 lots
+  - Max: 0.05 lots
+  - Note: BTC volatility varies widely
+
+ETHUSD (Ethereum):
+  - Base: 0.01 lots
+  - Max: 0.10 lots
+  - Note: ETH typically has smaller tick value
+
+================================================================================
+RISK MANAGEMENT SETTINGS
+================================================================================
+
+Daily Drawdown Limit: 4.5%
+  - System stops trading if daily DD exceeds this
+  - Resets at midnight broker time
+
+Max Drawdown Limit: 9.0%
+  - System stops trading if max DD from high water mark exceeds this
+  - Never resets - must manually restart or DD must recover
+
+Risk Per Trade: 0.5%
+  - Used for position sizing based on ATR
+  - Combined with max lots to cap exposure
+
+================================================================================
+ENTROPY FILTER EXPLAINED
+================================================================================
+
+The entropy filter prevents trading in chaotic market conditions.
+
+LOW ENTROPY (Predictable Market):
+  - EMAs aligned (Fast > Slow > 200 for bullish, opposite for bearish)
+  - Consistent EMA separation
+  - RSI in normal range (40-60 ideal)
+  - Stable ATR (not spiking)
+  - RESULT: Full lot size trades allowed
+
+MEDIUM ENTROPY (Mixed Market):
+  - Some alignment, some divergence
+  - RESULT: 50% lot size reduction
+
+HIGH ENTROPY (Chaotic Market):
+  - EMAs crossed or converging
+  - RSI at extremes
+  - ATR volatility spiking
+  - RESULT: NO NEW TRADES
+
+The +12 compression boost lowers the effective threshold, making the system
+more likely to find tradeable conditions while still filtering the worst chaos.
+
+================================================================================
+MONITORING
+================================================================================
+
+The system logs status every 5 minutes including:
+  - Position count per symbol
+  - Current entropy state
+  - Account balance and equity
+  - Block status if DD limits hit
+
+Watch for these log patterns:
+  - "HIDDEN SL HIT" - Virtual stop loss triggered
+  - "HIDDEN TP HIT" - Virtual take profit triggered
+  - "PARTIAL TP" - 50% position closed at first target
+  - "BREAKEVEN" - Stop moved to entry
+  - "TRAILING" - Stop moved with price
+  - "BLOCKED" - Trading halted due to DD limits
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+EA Won't Trade:
+1. Check "Allow Algo Trading" is enabled in MT5
+2. Check Expert properties allow trading
+3. Check account trading allowed (not weekend, market closed)
+4. Check entropy state - may be HIGH (no trading)
+5. Check DD limits - may be blocked
+
+Position Not Closing:
+1. Hidden SL/TP managed on every tick
+2. Ensure EA is running
+3. Check if price actually hit the virtual levels
+
+Wrong Lot Sizes:
+1. Check symbol's minimum lot (some brokers have 0.01, others 0.001)
+2. System auto-normalizes to broker's lot step
+
+================================================================================
+SUPPORT
+================================================================================
+
+Files Location: C:\Users\jimjj\Music\QuantumChildren\QuantumTradingLibrary\GetLeveraged_Grid\
+
+For issues, check:
+1. MT5 Experts tab for error messages
+2. Journal tab for trading errors
+3. Ensure symbols are in Market Watch
+
+================================================================================
+LLM DYNAMIC SL/TP INTEGRATION
+================================================================================
+
+OVERVIEW
+--------
+The system includes an optional Ollama LLM integration that analyzes market
+conditions and suggests dynamic SL/TP adjustments in real-time.
+
+INSTALLATION
+------------
+1. Download Ollama: https://ollama.ai
+2. Install and start: ollama serve
+3. Pull model: ollama pull mistral
+
+RUNNING
+-------
+Method 1: Use START_GETLEVERAGED_GRIDS.bat (handles everything)
+
+Method 2: Manual
+  cd C:\Users\jimjj\Music\QuantumChildren\QuantumTradingLibrary\GetLeveraged_Grid
+  python llm_sltp_optimizer.py 60
+
+The script runs every 60 seconds, analyzes all 3 symbols, and writes
+recommendations to MQL5\Files\llm_sltp_config.json
+
+WHAT IT ADJUSTS
+---------------
+Based on market conditions (volatility, trend, entropy), the LLM suggests:
+- SL multiplier: 1.0x to 2.5x ATR (base: 1.5x)
+- TP multiplier: 2.0x to 5.0x ATR (base: 3.0x)
+
+HIGH volatility -> Wider stops
+EXTREME volatility -> Much wider or skip
+LOW entropy -> Tighter stops OK
+HIGH entropy -> Wider stops needed
+STRONG trend -> Extended TP targets
+
+FALLBACK
+--------
+If Ollama is unavailable, the system uses rule-based logic automatically.
+Your trades will still execute with sensible SL/TP values.
+
+LOG FILE
+--------
+Check llm_sltp_optimizer.log for LLM decisions and reasoning.
+
+================================================================================

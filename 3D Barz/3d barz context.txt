@@ -1,0 +1,547 @@
+Combining 3D bars, quantum computing, and machine learning into a single trading system
+MetaTrader 5 – Trading Systems |December 19, 2025 at 7:45 AM
+
+813
+
+3
+Evgeniy Koshtenko
+Evgeniy Koshtenko
+In previous articles, we explored the use of quantum computing to extract nonlinear correlations from market data, as well as the integration of language models with CatBoost gradient boosting. Forecast accuracy was 62.4% in cross-validation, resulting in a return of +27.39% over a month of backtesting on a $140 micro account.
+
+However, analysis revealed that the system misses critical information—the multidimensional structure of the interaction between price, time, and volume. Classic indicators rely on market projections on two-dimensional charts, missing the three-dimensional picture of what's happening. This article presents the full integration of a 3D bar module into a quantum-enhanced trading system.
+
+
+
+Integrated system architecture
+The system consists of four interconnected modules. The first module receives data from MetaTrader 5 on eight currency pairs on the M15 timeframe. This data is simultaneously fed to three parallel processors: a 3D bar module, a Qiskit-based quantum encoder, and a technical indicator calculation unit.
+
+# System configuration 
+MODEL_NAME = "koshtenco/quantum-trader-fusion-3d" 
+BASE_MODEL = "llama3.2:3b" 
+SYMBOLS = [ "EURUSD" , "GBPUSD" , "USDCHF" , "USDCAD" , 
+            "AUDUSD" , "NZDUSD" , "EURGBP" , "AUDCHF" ]
+TIMEFRAME = mt5.TIMEFRAME_M15
+LOOKBACK = 400
+
+# Quantum parameters 
+N_QUBITS = 8 
+N_SHOTS = 2048
+
+# 3D Bars parameters 
+MIN_SPREAD_MULTIPLIER = 45 
+VOLUME_BRICK = 500 
+USE_3D_BARS = True
+The 3D Bars module transforms non-stationary OHLCV data into stationary 4D features. The quantum encoder uses 8 qubits to create 256 quantum states and extract nonlinear correlations. The technical indicators module calculates 33 classic indicators, including RSI, MACD, ATR, and others.
+
+All features are combined and fed into the CatBoost model, which processes 52+ features simultaneously. Gradient boosting is trained to predict the price movement direction in 24 hours. CatBoost's output is optionally processed by the Llama 3.2 3B language model, which adds contextual interpretation to the forecasts.
+
+
+
+Bars3D Class: Solving the Problem of Non-Stationarity
+The main problem with working with financial time series is their non-stationarity. EURUSD is trading at 1.0850 today, 1.0920 tomorrow, and 1.1500 a year from now. Absolute price values ​​are useless for machine learning, since the model is trained on specific numbers that will never be repeated in the future.
+
+class Bars3D:
+     """
+    A class for creating stationary 4D features (3D bars)
+    Implementation from the article on multidimensional bars
+    """
+    
+    def __init__(self, min_spread_multiplier: int = 45 , volume_brick: int = 500 ):
+        self.min_spread_multiplier = min_spread_multiplier
+        self.volume_brick = volume_brick
+        self.scaler = MinMaxScaler(feature_range=( 3 , 9 ))
+The normalization to the range from 3 to 9 is not random and is related to the harmonics of the numbers 3, 6, and 9, which were used in Gann's theory and Nikola Tesla's research. Empirically, this range produces more stationary series compared to the standard normalization to the interval from zero to one.
+
+The create_3d_features method takes a dataframe with OHLCV data and returns an enriched dataframe with stationary features:
+
+def create_3d_features(self, df: pd.DataFrame, symbol_info= None ) -> pd.DataFrame:
+     """Creates stationary 4D features from regular OHLCV data""" 
+    if  len (df) < 21 :
+        log.warning( "Not enough data for 3D bars" )
+         return df
+    
+    d = df.copy()
+    
+    # Time dimension (cyclic features) 
+    if  isinstance (d.index, pd.DatetimeIndex):
+        d[ 'time_sin' ] = np.sin( 2 * np.pi * d.index.hour / 24 )
+        d[ 'time_cos' ] = np.cos( 2 * np.pi * d.index.hour / 24 )
+    
+    # Price dimension (returns and acceleration) 
+    d[ 'typical_price' ] = (d[ 'high' ] + d[ 'low' ] + d[ 'close' ]) / 3 
+    d[ 'price_return' ] = d[ 'typical_price' ].pct_change()
+    d[ 'price_acceleration' ] = d[ 'price_return' ].diff()
+    
+    # Volume measurement 
+    d[ 'volume_change' ] = d[ 'tick_volume' ].pct_change()
+    d[ 'volume_acceleration' ] = d[ 'volume_change' ].diff()
+    
+    # Measuring volatility 
+    d[ 'volatility' ] = d[ 'price_return' ].rolling( 20 ).std()
+    d[ 'volatility_change' ] = d[ 'volatility' ].pct_change()
+The first dimension represents the temporal structure through cyclical features. The hour of the day is encoded not by a linear number from 0 to 23, but by two functions: sine and cosine. The sine of the hour is calculated as sin(2π × hour / 24), and the cosine is similar. This representation makes 11:00 PM and 12:00 AM mathematically close, unlike the naive approach where 23 and 0 are maximally distant.
+
+The second dimension describes price movement through returns and acceleration. Return is the percentage change in the typical price between bars. Acceleration is the difference between the current and previous returns, i.e., the second derivative of price with respect to time.
+
+The third dimension deals with volume information. Volume change is calculated as the percentage increase in tick volume between bars. Volume acceleration is the difference between the current and previous volume change.
+
+The fourth dimension captures volatility. Volatility is calculated as the standard deviation of returns over a 20-bar rolling window. Volatility change is the percentage increase in volatility between bars.
+
+For each bar starting from the twentieth, a sliding window of 21 points is created:
+
+# Create normalized features in a sliding window
+    bar3d_features = []
+    
+    for idx in  range ( 20 , len (d)):
+        window = d.iloc[idx- 20 :idx+ 1 ]
+        
+        features = {
+            'bar3d_price_return' : float (window[ 'price_return' ].iloc[- 1 ]),
+             'bar3d_price_accel' : float (window[ 'price_acceleration' ].iloc[- 1 ]),
+             'bar3d_volume_change' : float (window[ 'volume_change' ].iloc[- 1 ]),
+             'bar3d_volatility_change' : float (window[ 'volatility_change' ].iloc[- 1 ]),
+             'bar3d_volume_accel' : float (window[ 'volume_acceleration' ].iloc[- 1 ]),
+             'bar3d_time_sin' : float (d.iloc[idx][ 'time_sin' ]),
+             'bar3d_time_cos' : float (d.iloc[idx][ 'time_cos' ]),
+             'bar3d_price_velocity' : float (window[ 'price_acceleration' ].mean()),
+             'bar3d_volume_intensity' : float (window[ 'volume_change' ].mean()),
+             'bar3d_price_change_mean' : float (window[ 'price_return' ].mean()),
+        }
+        
+        bar3d_features.append(features)
+All features are combined into a dataframe and normalized using the MinMaxScaler scaler to a range from 3 to 9. Normalization is applied only to non-zero rows; missing values ​​are filled using backpropagation:
+# Normalize to range 3-9 
+    cols_to_scale = [col for col in bar3d_df.columns if col.startswith( 'bar3d_' )]
+     if cols_to_scale:
+        result[cols_to_scale] = result[cols_to_scale].bfill().fillna( 0 )
+        
+        mask = result[cols_to_scale]. abs (). sum (axis= 1 ) > 0 
+        if mask. sum () > 0 :
+            result.loc[mask, cols_to_scale] = self.scaler.fit_transform(
+                result.loc[mask, cols_to_scale]
+            )
+An analysis of over 400,000 EURUSD bars for the period 2022-2024 revealed an interesting pattern. When the 70% quantiles of price and volume volatility are simultaneously exceeded, there is an increased likelihood of a price reversal in the next few bars.
+
+# Additional metrics 
+result[ 'bar3d_price_volatility' ] = result[ 'bar3d_price_change_mean' ].rolling( 10 ).std()
+result[ 'bar3d_volume_volatility' ] = result[ 'bar3d_volume_change' ].rolling( 10 ).std()
+
+# Yellow cluster detector (reversal predictor) 
+result[ 'bar3d_yellow_cluster' ] = (
+    (result[ 'bar3d_price_volatility' ] > result[ 'bar3d_price_volatility' ].quantile( 0.7 )) &
+    (result[ 'bar3d_volume_volatility' ] > result[ 'bar3d_volume_volatility' ].quantile( 0.7 ))
+).astype( float )
+
+# Reversal probability based on yellow clusters 
+result[ 'bar3d_reversal_prob' ] = result[ 'bar3d_yellow_cluster' ].rolling( 7 , center= True ).mean()
+The detector is implemented using a logical condition. The 70% quantile of second-order price volatility is calculated over the entire available time series. The 70% quantile of volume volatility is calculated similarly. For each bar, it is checked whether the current price volatility exceeds its quantile and whether the current volume volatility exceeds its quantile.
+
+The reversal probability is calculated as the moving average of the yellow cluster in a 7-bar window with centering. Centering means the window looks three bars back, the current bar, and three bars ahead. This yields the local density of yellow clusters around the current point.
+
+The physical meaning of the yellow cluster is as follows: price moves with abnormally high volatility relative to its historical distribution, while volume simultaneously demonstrates instability in order flow. The combination of these two factors creates a state of maximum uncertainty. Most traders are in positions that turn out to be wrong. Smart money begins to reverse positions against the crowd.
+
+The direction of movement and the strength of the trend are calculated as follows:
+
+# Trend direction 
+result[ 'bar3d_direction' ] = np.sign(result[ 'bar3d_price_return' ])
+
+# Trend Counter
+trend_count = []
+count = 1 
+prev_dir = 0
+
+for direction in result[ 'bar3d_direction' ]:
+     if pd.isna(direction):
+        trend_count.append( 0 )
+         continue
+    
+    if direction == prev_dir:
+        count += 1 
+    else :
+        count = 1
+    
+    trend_count.append(count)
+    prev_dir = direction
+
+result[ 'bar3d_trend_count' ] = trend_count
+result[ 'bar3d_trend_strength' ] = result[ 'bar3d_trend_count' ] * result[ 'bar3d_direction' ]
+
+Quantum encoder based on Qiskit
+The QuantumEncoder class implements quantum feature encoding. The constructor accepts the number of qubits and the number of dimensions. Eight qubits create a space of 2^8, or 256 possible basis states:
+
+class QuantumEncoder:
+     """Quantum encoder based on Qiskit"""
+    
+    def __init__(self, n_qubits: int = 8 , n_shots: int = 2048 ):
+        self.n_qubits = n_qubits
+        self.n_shots = n_shots
+        self.simulator = AerSimulator()
+The encode_and_measure method accepts an array of features and returns a dictionary with four quantum metrics. The first step is to normalize the features into rotation angles:
+
+def encode_and_measure(self, features: np.ndarray) -> Dict [ str , float ]:
+     """Encodes features into a quantum circuit"""
+    
+    # Normalize to angles [0, π] 
+    normalized = (features - features. min ()) / (features. max () - features. min () + 1e-8 )
+    angles = normalized * np.pi
+    
+    # Creating a quantum circuit
+    qc = QuantumCircuit(self.n_qubits, self.n_qubits)
+    
+    # RY rotations for feature encoding 
+    for i in  range ( min ( len (angles), self.n_qubits)):
+        qc.ry(angles[i], i)
+    
+    # Creating entanglement via CZ gates (ring topology) 
+    for i in  range (self.n_qubits - 1 ):
+        qc.cz(i, i + 1 )
+    qc.cz(self.n_qubits - 1 , 0 )   # Closing the ring
+    
+    # Measurement 
+    qc.measure( range (self.n_qubits), range (self.n_qubits))
+For each qubit, an RY rotation is applied by the corresponding angle. The RY gate rotates the qubit around the Y axis of the Bloch sphere by a given angle. Mathematically, this transforms the qubit from the ground state |0⟩ to the superposition cos(θ/2)|0⟩ + sin(θ/2)|1⟩.
+
+The third step creates quantum entanglement between the qubits. A Controlled-Z gate is applied between each pair of adjacent qubits. Successive applications of a Controlled-Z gate between the qubits create a chain of correlations. Additionally, a Controlled-Z gate is applied between the last qubit (7) and the first qubit (0), closing the chain into a ring.
+
+The scheme is run on the simulator 2048 times. A probability array of length 256 is generated from the calculation dictionary:
+
+# Run the simulation
+    job = self.simulator.run(qc, shots=self.n_shots)
+    result = job.result()
+    counts = result.get_counts()
+    
+    # Convert to an array of probabilities 
+    total_shots = sum (counts.values())
+    probabilities = np.array([
+        counts.get( format (i, f'0 {self.n_qubits} b' ), 0 ) / total_shots 
+         for i in  range ( 2 **self.n_qubits)
+    ])
+    
+    # Extracting quantum features 
+    quantum_entropy = entropy(probabilities + 1e-10 , base= 2 )
+    dominant_state_prob = np. max (probabilities)
+    significant_states = np. sum (probabilities > 0.03 )
+    quantum_variance = np.var(probabilities)
+    
+    return {
+         'quantum_entropy' : quantum_entropy,
+         'dominant_state_prob' : dominant_state_prob,
+         'significant_states' : significant_states,
+         'quantum_variance' : quantum_variance
+    }
+Four quantum features are extracted from the probability distribution. Quantum entropy, using Shannon's formula, is calculated as the sum over all states of the product of the probability and the logarithm of the probability to base two. Entropy is measured in bits and ranges from zero to eight.
+
+High entropy—above 6.5—indicates a market in a state of uncertainty; low entropy—below 4.5—indicates a settled market. The probability of a dominant state is calculated as the maximum value among all 256 probabilities. The number of significant states calculates how many states have a probability above the 3% threshold. Quantum variance is the standard variance of a probability array.
+
+
+Technical Indicators: 33 Classic Signs
+The calculate_features function takes a dataframe with OHLCV data, an optional Bars3D instance, and symbol information:
+
+def calculate_features(df: pd.DataFrame, bars_3d: Bars3D = None , symbol_info= None ) -> pd.DataFrame:
+     """Calculation of technical indicators + 3D bars"""
+    d = df.copy()
+    d[ "close_prev" ] = d[ "close" ].shift( 1 )
+    
+    # ATR
+    tr = pd.concat([
+        d[ "high" ] - d[ "low" ],
+        (d[ "high" ] - d[ "close_prev" ]). abs (),
+        (d[ "low" ] - d[ "close_prev" ]). abs (),
+    ], axis= 1 ). max (axis= 1 )
+    d[ "ATR" ] = tr.rolling( 14 ).mean()
+    
+    # RSI 
+    delta = d[ "close" ].diff()
+    up = delta.clip(lower= 0 ).rolling( 14 ).mean()
+    down = (-delta.clip(upper= 0 )).rolling( 14 ).mean()
+    rs = up / down.replace( 0 , np.nan)
+    d[ "RSI" ] = 100 - ( 100 / ( 1 + rs))
+    
+    # MACD 
+    ema12 = d[ "close" ].ewm(span= 12 , adjust= False ).mean()
+    ema26 = d[ "close" ].ewm(span= 26 , adjust= False ).mean()
+    d[ "MACD" ] = ema12 - ema26
+    d[ "MACD_signal" ] = d[ "MACD" ].ewm(span= 9 , adjust= False ).mean()
+    
+    # Bollinger Bands 
+    d[ "BB_middle" ] = d[ "close" ].rolling( 20 ).mean()
+    bb_std = d[ "close" ].rolling( 20 ).std()
+    d[ "BB_upper" ] = d[ "BB_middle" ] + 2 * bb_std
+    d[ "BB_lower" ] = d[ "BB_middle" ] - 2 * bb_std
+    d[ "BB_position" ] = (d[ "close" ] - d[ "BB_lower" ]) / (d[ "BB_upper" ] - d[ "BB_lower" ])
+    
+    # Stochastic 
+    low_14 = d[ "low" ].rolling( 14 ). min ()
+    high_14 = d[ "high" ].rolling( 14 ). max ()
+    d[ "Stoch_K" ] = 100 * (d[ "close" ] - low_14) / (high_14 - low_14)
+    d[ "Stoch_D" ] = d[ "Stoch_K" ].rolling( 3 ).mean()
+    
+    # EMA 
+    d[ "EMA_50" ] = d[ "close" ].ewm(span= 50 , adjust= False ).mean()
+    d[ "EMA_200" ] = d[ "close" ].ewm(span= 200 , adjust= False ).mean()
+    
+    # Volumes and yields 
+    d[ "vol_ratio" ] = d[ "tick_volume" ] / d[ "tick_volume" ].rolling( 20 ).mean()
+    d[ "price_change_1" ] = d[ "close" ].pct_change( 1 )
+    d[ "price_change_5" ] = d[ "close" ].pct_change( 5 )
+    d[ "price_change_21" ] = d[ "close" ].pct_change( 21 )
+    d[ "volatility_20" ] = d[ "price_change_1" ].rolling( 20 ).std()
+    
+    # 3D Bars Integration 
+    if USE_3D_BARS and bars_3d is  not  None :
+        d = bars_3d.create_3d_features(d, symbol_info)
+    
+    return d.dropna()
+Average True Range is calculated as a moving average of the true range over a 14-bar window. True range captures volatility, taking into account gaps between bars. RSI is calculated as 100 minus 100 divided by one plus RS, where RS is the ratio of average advance to average decline.
+
+MACD is the difference between two exponential moving averages with periods of 12 and 26 bars. Bollinger Bands are constructed around a moving average of price plus or minus two standard deviations. The Stochastic Oscillator is calculated using the minimum and maximum values ​​over 14 bars.
+
+
+Training CatBoost on Joint Features
+The train_catboost_model function takes a dictionary of symbol dataframes, a quantum encoder instance, and a Bars3D instance:
+
+def train_catboost_model(data_dict: Dict [ str , pd.DataFrame],
+                        quantum_encoder: QuantumEncoder,
+                        bars_3d: Bars3D = None ) -> CatBoostClassifier:
+     """Trains CatBoost on data with quantum features + 3D bars"""
+    
+    all_features = []
+    all_targets = []
+    
+    for symbol, df in data_dict.items():
+        symbol_info = mt5.symbol_info(symbol)
+        df_features = calculate_features(df, bars_3d, symbol_info)
+        
+        for idx in  range (LOOKBACK, len (df_features) - PREDICTION_HORIZON):
+            row = df_features.iloc[idx]
+            future_row = df_features.iloc[idx + PREDICTION_HORIZON]
+            
+            # Target variable: UP (1) if the price in 24 hours is above 
+            target = 1  if future_row[ 'close' ] > row[ 'close' ] else  0
+            
+            # Quantum coding
+            feature_vector = np.array([
+                row[ 'RSI' ], row[ 'MACD' ], row[ 'ATR' ], row[ 'vol_ratio' ],
+                row[ 'BB_position' ], row[ 'Stoch_K' ],
+                row[ 'price_change_1' ], row[ 'volatility_20' ]
+            ])
+            quantum_feats = quantum_encoder.encode_and_measure(feature_vector)
+            
+            # Combining all features
+            features = {
+                'RSI' : row[ 'RSI' ], 'MACD' : row[ 'MACD' ], 'ATR' : row[ 'ATR' ],
+                 'vol_ratio' : row[ 'vol_ratio' ], 'BB_position' : row[ 'BB_position' ],
+                 'Stoch_K' : row[ 'Stoch_K' ], 'Stoch_D' : row[ 'Stoch_D' ],
+                 'EMA_50' : row[ 'EMA_50' ], 'EMA_200' : row[ 'EMA_200' ],
+                 'price_change_1' : row[ 'price_change_1' ],
+                 'price_change_5' : row[ 'price_change_5' ],
+                 'price_change_21' : row[ 'price_change_21' ],
+                 'volatility_20' : row[ 'volatility_20' ],
+                 'quantum_entropy' : quantum_feats[ 'quantum_entropy' ],
+                 'dominant_state_prob' : quantum_feats[ 'dominant_state_prob' ],
+                 'significant_states' : quantum_feats[ 'significant_states' ],
+                 'quantum_variance' : quantum_feats[ 'quantum_variance' ],
+                 'symbol' : symbol
+            }
+            
+            # Add 3D bars if available 
+            if USE_3D_BARS and  'bar3d_price_return'  in row:
+                features.update({
+                    'bar3d_yellow_cluster' : row.get( 'bar3d_yellow_cluster' , 0 ),
+                     'bar3d_reversal_prob' : row.get( 'bar3d_reversal_prob' , 0 ),
+                     'bar3d_trend_strength' : row.get( 'bar3d_trend_strength' , 0 ),
+                     'bar3d_price_volatility' : row.get( 'bar3d_price_volatility' , 0 ),
+                     'bar3d_volume_volatility' : row.get( 'bar3d_volume_volatility' , 0 ),
+                })
+            
+            all_features.append(features)
+            all_targets.append(target)
+For each position, the current bar and future bar are extracted using PREDICTION_HORIZON positions ahead. The target variable is set to one if the future bar's closing price is higher than the current one, and zero otherwise. A feature vector for quantum coding is created from eight key technical indicators.
+
+A dictionary of features is generated for the current bar. All 33 technical indicators are included, four quantum features are added, and the symbol name is added as a categorical feature. If the USE_3D_BARS flag is enabled, five key features from 3D bars are added.
+
+Training a model with TimeSeriesSplit cross-validation:
+
+X = pd.DataFrame(all_features)
+    y = np.array(all_targets)
+    X = pd.get_dummies(X, columns=[ 'symbol' ], prefix= 'sym' )
+    
+    model = CatBoostClassifier(
+        iterations= 3000 ,
+        learning_rate= 0.03 ,
+        depth= ​​8 ,
+        loss_function= 'Logloss' ,
+        eval_metric= 'Accuracy' ,
+        random_seed= 42 ,
+        verbose= 500
+    )
+    
+    from sklearn.model_selection import TimeSeriesSplit
+    tscv = TimeSeriesSplit(n_splits= 3 )
+    
+    accuracies = []
+    for fold_idx, (train_idx, val_idx) in  enumerate (tscv.split(X)):
+        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+        y_train, y_val = y[train_idx], y[val_idx]
+        
+        model.fit(X_train, y_train, eval_set=(X_val, y_val), verbose= False )
+        accuracy = model.score(X_val, y_val)
+        accuracies.append(accuracy)
+        print ( f"Fold {fold_idx + 1 } Accuracy: {accuracy* 100 : .2 f} %" )
+    
+    print ( f"Average accuracy: {np.mean(accuracies)* 100 : .2 f} % ± {np.std(accuracies)* 100 : .2 f} %" )
+TimeSeriesSplit splits the data sequentially over time. For three folds, the first is trained on the first 33% of the data and validated on the next 33%. The second is trained on the first 67% and validated on the last 33%. The third is trained on all data except the last 33% and validated on them.
+
+Feature importance analysis shows the contribution of 3D bars:
+
+# Train the final model on all data 
+    model.fit(X, y, verbose= 500 )
+    model.save_model( "models/catboost_quantum_3d.cbm" )
+    
+    # Analysis of feature importance
+    feature_importance = model.get_feature_importance()
+    feature_names = X.columns
+    importance_df = pd.DataFrame({
+        'feature' : feature_names,
+         'importance' : feature_importance
+    }).sort_values( 'importance' , ascending= False )
+    
+    print ( "TOP 10 IMPORTANT FEATURES:" )
+     print (importance_df.head( 10 ))
+    
+    # Check 3D bars in the top 
+    if USE_3D_BARS:
+        bar3d_features = importance_df[importance_df[ 'feature' ]. str .startswith( 'bar3d_' )]
+         print ( f"\nTOP 3D BARS ( {len(bar3d_features)} features):" )
+         print (bar3d_features.head( 10 ))
+The training results show an average accuracy of 65.8% with a standard deviation of 0.5%. This is 3.4 percentage points higher than the previous version without 3D bars. The top 10 important features include bar3d_yellow_cluster in first place with an importance of 18.7%, quantum_entropy in second place with 16.2%, and bar3d_reversal_prob in third place with 12.4%.
+
+
+Backtesting: from $140 to $193
+The backtest function backtests the trained model on historical data for the last 30 days:
+
+def backtest(catboost_model, use_llm= False ):
+     """Backtesting with CatBoost + Quantum + 3D"""
+    
+    end = datetime.now().replace(second= 0 , microsecond= 0 )
+    start = end - timedelta(days=BACKTEST_DAYS)
+    
+    # Loading data
+    data = {}
+    for sym in SYMBOLS:
+        rates = mt5.copy_rates_range(sym, TIMEFRAME, start, end)
+        if rates is  None  or  len (rates) == 0 :
+             continue
+        df = pd.DataFrame(rates)
+        df[ "time" ] = pd.to_datetime(df[ "time" ], unit= "s" )
+        df.set_index( "time" , inplace= True )
+         if  len (df) > LOOKBACK + PREDICTION_HORIZON:
+            data[sym] = df
+    
+    balance = INITIAL_BALANCE
+    trades = []
+    
+    quantum_encoder = QuantumEncoder(N_QUBITS, N_SHOTS)
+    bars_3d = Bars3D(MIN_SPREAD_MULTIPLIER, VOLUME_BRICK)
+    
+    # Analysis points every 24 hours 
+    main_symbol = list (data.keys())[ 0 ]
+    main_data = data[main_symbol]
+    total_bars = len (main_data)
+    analysis_points = list ( range (LOOKBACK, total_bars - PREDICTION_HORIZON, PREDICTION_HORIZON))
+For each analysis point, the system loads historical data up to the current moment, calculates all features including 3D bars, performs quantum encoding, and receives a forecast from CatBoost:
+for point_idx, current_idx in  enumerate (analysis_points):
+        current_time = main_data.index[current_idx]
+        
+        for sym in SYMBOLS:
+            historical_data = data[sym].iloc[:current_idx + 1 ].copy()
+            symbol_info = mt5.symbol_info(sym)
+            
+            df_with_features = calculate_features(historical_data, bars_3d, symbol_info)
+            row = df_with_features.iloc[- 1 ]
+            
+            # Quantum coding
+            feature_vector = np.array([
+                row[ 'RSI' ], row[ 'MACD' ], row[ 'ATR' ], row[ 'vol_ratio' ],
+                row[ 'BB_position' ], row[ 'Stoch_K' ],
+                row[ 'price_change_1' ], row[ 'volatility_20' ]
+            ])
+            quantum_feats = quantum_encoder.encode_and_measure(feature_vector)
+            
+            # Forming features for CatBoost
+            X_features = {
+                'RSI' : row[ 'RSI' ], 'MACD' : row[ 'MACD' ], 'ATR' : row[ 'ATR' ],
+                 # ... all 33 technical 
+                'quantum_entropy' : quantum_feats[ 'quantum_entropy' ],
+                 'dominant_state_prob' : quantum_feats[ 'dominant_state_prob' ],
+                 'significant_states' : quantum_feats[ 'significant_states' ],
+                 'quantum_variance' : quantum_feats[ 'quantum_variance' ],
+            }
+            
+            # Add 3D features 
+            if  'bar3d_yellow_cluster'  in row:
+                X_features.update({
+                    'bar3d_yellow_cluster' : row.get( 'bar3d_yellow_cluster' , 0 ),
+                     'bar3d_reversal_prob' : row.get( 'bar3d_reversal_prob' , 0 ),
+                     'bar3d_trend_strength' : row.get( 'bar3d_trend_strength' , 0 ),
+                     'bar3d_price_volatility' : row.get( 'bar3d_price_volatility' , 0 ),
+                     'bar3d_volume_volatility' : row.get( 'bar3d_volume_volatility' , 0 ),
+                })
+            
+            # CatBoost Forecast
+            X_df = pd.DataFrame([X_features])
+            for s in SYMBOLS:
+                X_df[ f'sym_ {s} ' ] = 1  if s == sym else  0
+            
+            proba = catboost_model.predict_proba(X_df)[ 0 ]
+            catboost_direction = "UP"  if proba[ 1 ] > 0.5  else  "DOWN" 
+            catboost_confidence = max (proba) * 100
+            
+            # Check for yellow cluster 
+            if row.get( 'bar3d_yellow_cluster' , 0 ) > 0.5 :
+                 print ( f" YELLOW CLUSTER!" )
+The presence of a yellow cluster is checked and a warning is issued. If the final confidence level is above the minimum threshold, a virtual trade is opened, taking into account all costs:
+if final_confidence < MIN_PROB:
+                 continue
+            
+            # Calculate the result after 24 hours
+            exit_idx = current_idx + PREDICTION_HORIZON
+            exit_row = data[sym].iloc[exit_idx]
+            
+            # Spread accounting 
+            entry_price = row[ 'close' ] + SPREAD_PIPS * point if final_direction == "UP"  else row[ 'close' ]
+            exit_price = exit_row[ 'close' ] if final_direction == "UP"  else exit_row[ 'close' ] + SPREAD_PIPS * point
+            
+            # Price movement in points 
+            price_move_pips = (exit_price - entry_price) / point if final_direction == "UP"  else (entry_price - exit_price) / point
+            
+            # Position sizing based on ATR
+            risk_amount = balance * RISK_PER_TRADE
+            atr_pips = row[ 'ATR' ] / point
+            stop_loss_pips = max ( 20 , atr_pips * 2 )
+            lot_size = risk_amount / (stop_loss_pips * point * contract_size)
+            lot_size = max ( 0.01 , min (lot_size, 10.0 ))
+            
+            # Profit taking into account swap and slippage
+            profit_usd = price_move_pips * point * contract_size * lot_size
+            profit_usd -= swap_cost * (lot_size / 0.01 )
+            profit_usd -= SLIPPAGE * point * contract_size * lot_size
+            
+            balance += profit_usd
+After processing all analysis points, final statistics are calculated. These include the total number of trades, the number of profitable trades, win rate, average profit and loss, profit factor, maximum drawdown, and sharpe ratio.
+
+
+
+
+Conclusion
+The 3D Bars module increased the trading system's efficiency: accuracy +3.4 percentage points, win rate +3.85%, and profitability +10.66%. This confirms the value of multidimensional market analysis.
+
+The yellow cluster detector identifies areas of increased volatility. With coverage of ~40% of reversals, the signal is highly specific and useful for risk management.
+
+Three of the five key features are derived from 3D bars. The bar3d_yellow_cluster feature is the most important (18.7%), ahead of quantum entropy (16.2%).
+
+The system is implemented in a single Python file (1,691 lines). It uses MetaTrader5, Qiskit, CatBoost, Ollama, NumPy, Pandas, and Scikit-learn. Training time: 2–3 hours on CPU. Forecast time: ~3 seconds for 8 currency pairs.
+
+Limitations: 3D bar plotting takes 5–10 minutes for 15,000 candles; parameters are configured for EURUSD M15 and require adaptation for other markets; market instability requires retraining every 1–2 months.
+
+Further developments: multi-timeframe analysis, use of real quantum processors, expansion to other assets, dynamic parameter adjustment, model ensembles.

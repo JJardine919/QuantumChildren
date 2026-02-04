@@ -1,0 +1,147 @@
+[13:46:35][GL] Initializing: ['GL_ACCOUNT_1', 'GL_ACCOUNT_2', 'GL_ACCOUNT_3']
+[13:46:35][GL] Loaded 51 experts
+[13:46:35][GL] Loaded 51 experts
+[13:46:35][GL] Loaded 51 experts
+[13:46:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:47:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:48:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:49:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:50:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:51:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:52:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:53:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:54:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:55:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:56:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:56:48][GL] Initializing: ['GL_ACCOUNT_1', 'GL_ACCOUNT_2', 'GL_ACCOUNT_3']
+[13:56:48][GL] Loaded 51 experts
+[13:56:48][GL] Loaded 51 experts
+[13:56:48][GL] Loaded 51 experts
+[13:56:48][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[13:56:48][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[13:57:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:57:48][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[13:57:48][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[13:58:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:58:48][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[13:58:48][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[13:59:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[13:59:48][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[13:59:48][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:00:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:00:48][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:00:48][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:01:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:01:48][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:01:48][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[14:02:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:02:48][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:02:48][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:03:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:03:48][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:03:48][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:04:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:04:48][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:04:48][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[14:05:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:05:48][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:05:48][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:06:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:06:48][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:06:48][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:07:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:07:48][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:07:48][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[14:08:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:08:48][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:08:48][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:09:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:09:48][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:09:48][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:10:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:10:48][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:10:48][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[14:11:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:11:41][GL] Initializing: ['GL_ACCOUNT_1', 'GL_ACCOUNT_2', 'GL_ACCOUNT_3']
+[14:11:41][GL] Looking for experts at: C:\Users\jimjj\Music\QuantumChildren\QuantumTradingLibrary\top_50_experts\top_50_manifest.json
+[14:11:41][GL] Loaded 51 experts
+[14:11:41][GL] Looking for experts at: C:\Users\jimjj\Music\QuantumChildren\QuantumTradingLibrary\top_50_experts\top_50_manifest.json
+[14:11:41][GL] Loaded 51 experts
+[14:11:41][GL] Looking for experts at: C:\Users\jimjj\Music\QuantumChildren\QuantumTradingLibrary\top_50_experts\top_50_manifest.json
+[14:11:41][GL] Loaded 51 experts
+[14:11:48][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:11:48][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:12:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:12:46][GL] [GL_ACCOUNT_1] Login failed: (-10005, 'IPC timeout')
+[14:12:48][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:12:48][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:13:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:13:46][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:13:46][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:13:48][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:13:48][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[14:14:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:14:46][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:14:46][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[14:14:48][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:14:48][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:15:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:15:46][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:15:46][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:15:48][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:15:48][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:16:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:16:46][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:16:46][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:16:48][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:16:48][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[14:17:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:17:46][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:17:46][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[14:17:48][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:17:48][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:18:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:18:46][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:18:46][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:18:48][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:18:48][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:19:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:19:46][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:19:46][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:19:48][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:19:48][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[14:20:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:20:46][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:20:46][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[14:20:48][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:20:48][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:21:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:21:46][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:21:46][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:21:48][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:21:48][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:22:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:22:46][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:22:46][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:22:48][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:22:48][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[14:23:35][GL] [GL_ACCOUNT_2] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:23:46][GL] [GL_ACCOUNT_3] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:23:46][GL] [GL_ACCOUNT_3] Make sure MT5 is running and logged into GetLeveraged
+[14:23:48][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:23:48][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:24:35][GL] [GL_ACCOUNT_3] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[14:24:46][GL] [GL_ACCOUNT_1] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:24:46][GL] [GL_ACCOUNT_1] Make sure MT5 is running and logged into GetLeveraged
+[14:24:48][GL] [GL_ACCOUNT_2] MT5 init failed: (-6, 'Terminal: Authorization failed')
+[14:24:48][GL] [GL_ACCOUNT_2] Make sure MT5 is running and logged into GetLeveraged
+[14:25:35][GL] [GL_ACCOUNT_1] MT5 init failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe'")
+[01:04:02][GL] Initializing: ['GL_ACCOUNT_1', 'GL_ACCOUNT_2', 'GL_ACCOUNT_3']
+[01:04:02][GL] Looking for experts at: C:\Users\jimjj\Music\QuantumChildren\QuantumTradingLibrary\top_50_experts\top_50_manifest.json
+[01:04:02][GL] Loaded 51 experts
+[01:04:02][GL] Looking for experts at: C:\Users\jimjj\Music\QuantumChildren\QuantumTradingLibrary\top_50_experts\top_50_manifest.json
+[01:04:02][GL] Loaded 51 experts
+[01:04:02][GL] Looking for experts at: C:\Users\jimjj\Music\QuantumChildren\QuantumTradingLibrary\top_50_experts\top_50_manifest.json
+[01:04:02][GL] Loaded 51 experts
+[01:05:10][GL] [GL_ACCOUNT_1] Login failed: (-10005, 'IPC timeout')
+[01:07:17][GL] [GL_ACCOUNT_2] Login failed: (-10005, 'IPC timeout')
