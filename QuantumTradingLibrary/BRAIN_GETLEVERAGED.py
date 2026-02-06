@@ -51,6 +51,12 @@ from config_loader import (
     CHECK_INTERVAL_SECONDS
 )
 
+# Import credentials securely - passwords from .env file
+from credential_manager import get_credentials, CredentialError
+
+# Pre-launch validation
+from prelaunch_validator import validate_prelaunch
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -63,53 +69,46 @@ logging.basicConfig(
 )
 
 # ============================================================
-# GETLEVERAGED ACCOUNTS ONLY
+# GETLEVERAGED ACCOUNTS - Credentials from .env via credential_manager
 # ============================================================
 
-ACCOUNTS = {
-    'GL_ACCOUNT_1': {
-        'account': 113326,
-        'password': '%bwN)IvJ5F',
-        'server': 'GetLeveraged-Trade',
-        'terminal_path': None,  # Will auto-detect or use running MT5
-        'name': 'GetLeveraged Account 1',
-        'initial_balance': 10000,
-        'profit_target': 0.10,
-        'daily_loss_limit': 0.05,
-        'max_drawdown': 0.10,
-        'locked': False,  # ACTIVE
-        'symbols': ['BTCUSD', 'XAUUSD', 'ETHUSD'],
-        'magic_number': 113001,
-    },
-    'GL_ACCOUNT_2': {
-        'account': 113328,
-        'password': 'H*M5c7jpR7',
-        'server': 'GetLeveraged-Trade',
-        'terminal_path': None,  # Will auto-detect or use running MT5
-        'name': 'GetLeveraged Account 2',
-        'initial_balance': 10000,
-        'profit_target': 0.10,
-        'daily_loss_limit': 0.05,
-        'max_drawdown': 0.10,
-        'locked': False,  # ACTIVE
-        'symbols': ['BTCUSD', 'XAUUSD', 'ETHUSD'],
-        'magic_number': 113002,
-    },
-    'GL_ACCOUNT_3': {
-        'account': 107245,
-        'password': '$86eCmFbXR',
-        'server': 'GetLeveraged-Trade',
-        'terminal_path': None,  # Will auto-detect or use running MT5
-        'name': 'GetLeveraged Account 3',
-        'initial_balance': 10000,
-        'profit_target': 0.10,
-        'daily_loss_limit': 0.05,
-        'max_drawdown': 0.10,
-        'locked': False,  # ACTIVE
-        'symbols': ['BTCUSD', 'XAUUSD', 'ETHUSD'],
-        'magic_number': 107001,
-    },
-}
+def _load_gl_accounts():
+    """Load GetLeveraged accounts with credentials from .env file."""
+    accounts = {}
+    gl_configs = [
+        ('GL_1', 'GL_ACCOUNT_1', 'GetLeveraged Account 1', 113001),
+        ('GL_2', 'GL_ACCOUNT_2', 'GetLeveraged Account 2', 113002),
+        ('GL_3', 'GL_ACCOUNT_3', 'GetLeveraged Account 3', 107001),
+    ]
+
+    for cred_key, account_key, name, magic in gl_configs:
+        try:
+            creds = get_credentials(cred_key)
+            accounts[account_key] = {
+                'account': creds['account'],
+                'password': creds['password'],
+                'server': creds['server'],
+                'terminal_path': creds.get('terminal_path'),
+                'name': name,
+                'initial_balance': 10000,
+                'profit_target': 0.10,
+                'daily_loss_limit': 0.05,
+                'max_drawdown': 0.10,
+                'locked': False,
+                'symbols': creds.get('symbols', ['BTCUSD', 'XAUUSD', 'ETHUSD']),
+                'magic_number': creds.get('magic', magic),
+            }
+        except CredentialError as e:
+            logging.warning(f"Skipping {cred_key}: {e}")
+
+    if not accounts:
+        logging.error("No GetLeveraged accounts configured!")
+        logging.error("Please add GL_1_PASSWORD, GL_2_PASSWORD, GL_3_PASSWORD to .env file")
+        sys.exit(1)
+
+    return accounts
+
+ACCOUNTS = _load_gl_accounts()
 
 
 # ============================================================
@@ -134,10 +133,8 @@ class Action(Enum):
     SELL = 2
 
 
-class Regime(Enum):
-    CLEAN = "CLEAN"
-    VOLATILE = "VOLATILE"
-    CHOPPY = "CHOPPY"
+# Regime enum and bridge from quantum_regime_bridge
+from quantum_regime_bridge import QuantumRegimeBridge, Regime
 
 
 # ============================================================
@@ -161,33 +158,16 @@ class LSTMModel(nn.Module):
 
 
 # ============================================================
-# REGIME DETECTOR (Compression-based)
+# REGIME DETECTOR (delegates to QuantumRegimeBridge)
 # ============================================================
 
 class RegimeDetector:
     def __init__(self, config: BrainConfig):
         self.config = config
+        self._bridge = QuantumRegimeBridge(config)
 
-    def analyze_regime(self, prices: np.ndarray) -> Tuple[Regime, float]:
-        import zlib
-        data_bytes = prices.astype(np.float32).tobytes()
-        compressed = zlib.compress(data_bytes, level=9)
-        ratio = len(data_bytes) / len(compressed)
-
-        # Log the actual ratio for debugging
-        logging.debug(f"Compression ratio: {ratio:.3f} (need >= 1.3 for CLEAN)")
-
-        if ratio >= 1.1:
-            fidelity = 0.96
-            regime = Regime.CLEAN
-        elif ratio >= 0.9:
-            fidelity = 0.88
-            regime = Regime.VOLATILE
-        else:
-            fidelity = 0.75
-            regime = Regime.CHOPPY
-
-        return regime, fidelity
+    def analyze_regime(self, prices: np.ndarray, symbol: str = "BTCUSD") -> Tuple[Regime, float]:
+        return self._bridge.analyze_regime(prices, symbol=symbol)
 
 
 # ============================================================
@@ -412,7 +392,7 @@ class AccountTrader:
         df['time'] = pd.to_datetime(df['time'], unit='s')
         prices = df['close'].values
 
-        regime, fidelity = self.regime_detector.analyze_regime(prices)
+        regime, fidelity = self.regime_detector.analyze_regime(prices, symbol=symbol)
         logging.info(f"[{self.account_key}][{symbol}] Regime: {regime.value} ({fidelity:.3f})")
 
         if regime != Regime.CLEAN:
@@ -653,6 +633,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='GetLeveraged Quantum Brain')
     parser.add_argument('--unlock-all', action='store_true', help='Trade all GL accounts')
     args = parser.parse_args()
+
+    # Pre-launch validation - ensures experts are trained before trading
+    # Collect all symbols from all active accounts
+    all_symbols = set()
+    for acc in ACCOUNTS.values():
+        all_symbols.update(acc.get('symbols', []))
+    if not validate_prelaunch(symbols=list(all_symbols)):
+        logging.error("Pre-launch validation failed. Exiting.")
+        sys.exit(1)
 
     brain = GetLeveragedBrain(unlock_all=args.unlock_all)
     brain.run_loop()

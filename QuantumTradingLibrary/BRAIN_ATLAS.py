@@ -41,12 +41,22 @@ except ImportError:
 # Import trading settings from config - DO NOT HARDCODE
 from config_loader import (
     MAX_LOSS_DOLLARS,
+    INITIAL_SL_DOLLARS,
     TP_MULTIPLIER,
     ROLLING_SL_MULTIPLIER,
     DYNAMIC_TP_PERCENT,
+    SET_DYNAMIC_TP,
+    ROLLING_SL_ENABLED,
     CONFIDENCE_THRESHOLD,
-    CHECK_INTERVAL_SECONDS
+    CHECK_INTERVAL_SECONDS,
+    REQUIRE_TRAINED_EXPERT
 )
+
+# Import credentials securely - passwords from .env file
+from credential_manager import get_credentials, CredentialError
+
+# Pre-launch validation
+from prelaunch_validator import validate_prelaunch
 
 # Configure logging
 logging.basicConfig(
@@ -60,25 +70,35 @@ logging.basicConfig(
 )
 
 # ============================================================
-# ATLAS ACCOUNT ONLY
+# ATLAS ACCOUNT ONLY - Credentials from .env via credential_manager
 # ============================================================
 
-ACCOUNTS = {
-    'ATLAS': {
-        'account': 212000584,
-        'password': 'M6NLk79MN@',
-        'server': 'AtlasFunded-Server',
-        'terminal_path': r"C:\Program Files\Atlas Funded MT5 Terminal\terminal64.exe",
-        'name': 'Atlas Funded',
-        'initial_balance': 50000,
-        'profit_target': 0.10,
-        'daily_loss_limit': 0.05,
-        'max_drawdown': 0.10,
-        'locked': False,  # ACTIVE
-        'symbols': ['BTCUSD', 'ETHUSD', 'XAUUSD'],
-        'magic_number': 212001,
-    },
-}
+def _load_atlas_account():
+    """Load Atlas account with credentials from .env file."""
+    try:
+        creds = get_credentials('ATLAS')
+        return {
+            'ATLAS': {
+                'account': creds['account'],
+                'password': creds['password'],
+                'server': creds['server'],
+                'terminal_path': creds.get('terminal_path') or r"C:\Program Files\Atlas Funded MT5 Terminal\terminal64.exe",
+                'name': 'Atlas Funded',
+                'initial_balance': 50000,
+                'profit_target': 0.10,
+                'daily_loss_limit': 0.05,
+                'max_drawdown': 0.10,
+                'locked': False,
+                'symbols': creds.get('symbols', ['BTCUSD', 'ETHUSD']),
+                'magic_number': creds.get('magic', 212001),
+            },
+        }
+    except CredentialError as e:
+        logging.error(f"Failed to load ATLAS credentials: {e}")
+        logging.error("Please configure ATLAS_PASSWORD in .env file")
+        sys.exit(1)
+
+ACCOUNTS = _load_atlas_account()
 
 
 # ============================================================
@@ -103,10 +123,8 @@ class Action(Enum):
     SELL = 2
 
 
-class Regime(Enum):
-    CLEAN = "CLEAN"
-    VOLATILE = "VOLATILE"
-    CHOPPY = "CHOPPY"
+# Regime enum and bridge from quantum_regime_bridge
+from quantum_regime_bridge import QuantumRegimeBridge, Regime
 
 
 # ============================================================
@@ -130,30 +148,16 @@ class LSTMModel(nn.Module):
 
 
 # ============================================================
-# REGIME DETECTOR (Compression-based)
+# REGIME DETECTOR (delegates to QuantumRegimeBridge)
 # ============================================================
 
 class RegimeDetector:
     def __init__(self, config: BrainConfig):
         self.config = config
+        self._bridge = QuantumRegimeBridge(config)
 
-    def analyze_regime(self, prices: np.ndarray) -> Tuple[Regime, float]:
-        import zlib
-        data_bytes = prices.astype(np.float32).tobytes()
-        compressed = zlib.compress(data_bytes, level=9)
-        ratio = len(data_bytes) / len(compressed)
-
-        if ratio >= 1.1:
-            fidelity = 0.96
-            regime = Regime.CLEAN
-        elif ratio >= 0.9:
-            fidelity = 0.88
-            regime = Regime.VOLATILE
-        else:
-            fidelity = 0.75
-            regime = Regime.CHOPPY
-
-        return regime, fidelity
+    def analyze_regime(self, prices: np.ndarray, symbol: str = "BTCUSD") -> Tuple[Regime, float]:
+        return self._bridge.analyze_regime(prices, symbol=symbol)
 
 
 # ============================================================
@@ -352,8 +356,7 @@ class AccountTrader:
         return True
 
     def get_lot_size(self, symbol: str) -> float:
-        # Lot range 0.01-0.03 - small lots = less swing = tighter stops
-        # Let system decide within safe range
+        # Lot range based on symbol minimums - some symbols require 0.1+ minimum
         account_info = mt5.account_info()
         symbol_info = mt5.symbol_info(symbol)
 
@@ -361,12 +364,18 @@ class AccountTrader:
             return 0.01
 
         vol_step = symbol_info.volume_step
+        vol_min = symbol_info.volume_min  # CRITICAL: Get actual minimum
+        vol_max = symbol_info.volume_max
 
-        # Scale slightly with balance but cap at 0.03
-        desired_lot = (account_info.balance / 100000) * 0.01  # Much smaller scaling
+        # Scale slightly with balance
+        desired_lot = (account_info.balance / 100000) * 0.01
         lot = round(desired_lot / vol_step) * vol_step
-        lot = max(0.01, min(lot, 0.03))  # Hard cap at 0.03
-        return lot
+
+        # Respect symbol's actual min/max, then cap at our max (0.05)
+        lot = max(vol_min, lot)  # Use symbol's minimum, not hardcoded 0.01
+        lot = min(lot, min(vol_max, 0.05))  # Cap at 0.05 or symbol max
+
+        logging.info(f"[{self.account_key}][{symbol}] Lot: {lot} (min={vol_min}, step={vol_step})")
         return lot
 
     def analyze_symbol(self, symbol: str) -> Tuple[Regime, float, Optional[Action], float]:
@@ -378,7 +387,7 @@ class AccountTrader:
         df['time'] = pd.to_datetime(df['time'], unit='s')
         prices = df['close'].values
 
-        regime, fidelity = self.regime_detector.analyze_regime(prices)
+        regime, fidelity = self.regime_detector.analyze_regime(prices, symbol=symbol)
         logging.info(f"[{self.account_key}][{symbol}] Regime: {regime.value} ({fidelity:.3f})")
 
         if regime != Regime.CLEAN:
@@ -437,12 +446,18 @@ class AccountTrader:
             return False
 
         lot = self.get_lot_size(symbol)
+        if lot <= 0:
+            logging.error(f"[{self.account_key}] Invalid lot size for {symbol}")
+            return False
 
         # All values from config_loader (MASTER_CONFIG.json)
         tick_value = symbol_info.trade_tick_value
         tick_size = symbol_info.trade_tick_size
         point = symbol_info.point
         stops_level = symbol_info.trade_stops_level
+        spread = symbol_info.spread
+
+        logging.info(f"[{self.account_key}][{symbol}] Symbol specs: tick_val={tick_value}, tick_size={tick_size}, point={point}, stops_level={stops_level}, spread={spread}")
 
         # Calculate SL distance for MAX_LOSS_DOLLARS
         if tick_value > 0 and lot > 0:
@@ -451,11 +466,21 @@ class AccountTrader:
         else:
             sl_distance = 100 * point
 
-        # Respect broker's minimum stop level
-        min_sl_distance = (stops_level + 10) * point
+        # Respect broker's minimum stop level - use LARGER buffer
+        # stops_level is in points, add buffer for spread and safety
+        min_sl_distance = (stops_level + spread + 20) * point
         if sl_distance < min_sl_distance:
-            logging.warning(f"[{self.account_key}] SL {sl_distance:.5f} < min {min_sl_distance:.5f}, using minimum")
+            logging.warning(f"[{self.account_key}][{symbol}] SL distance {sl_distance:.5f} < min {min_sl_distance:.5f}, adjusting")
             sl_distance = min_sl_distance
+            # Recalculate lot to maintain max loss limit with wider SL
+            new_sl_ticks = sl_distance / tick_size
+            if tick_value > 0 and new_sl_ticks > 0:
+                new_lot = MAX_LOSS_DOLLARS / (tick_value * new_sl_ticks)
+                new_lot = max(symbol_info.volume_min, new_lot)
+                new_lot = round(new_lot / symbol_info.volume_step) * symbol_info.volume_step
+                if new_lot < lot:
+                    lot = new_lot
+                    logging.info(f"[{self.account_key}][{symbol}] Reduced lot to {lot} to maintain ${MAX_LOSS_DOLLARS} max loss")
 
         # TP from config
         tp_distance = sl_distance * TP_MULTIPLIER
@@ -471,7 +496,21 @@ class AccountTrader:
             sl = price + sl_distance
             tp = price - tp_distance
 
-        logging.info(f"[{self.account_key}] SL Distance: {sl_distance:.2f} | Max Loss: ${MAX_LOSS_DOLLARS}")
+        # Normalize SL/TP to symbol's price precision
+        digits = symbol_info.digits
+        sl = round(sl, digits)
+        tp = round(tp, digits)
+        price = round(price, digits)
+
+        # Final validation: ensure stops are far enough from price
+        actual_sl_distance = abs(price - sl)
+        min_required = (stops_level + spread) * point
+        if actual_sl_distance < min_required:
+            logging.error(f"[{self.account_key}][{symbol}] ABORT: SL too close! Distance={actual_sl_distance:.5f}, Required={min_required:.5f}")
+            return False
+
+        logging.info(f"[{self.account_key}][{symbol}] Price: {price}, SL: {sl}, TP: {tp}, Lot: {lot}")
+        logging.info(f"[{self.account_key}][{symbol}] SL Distance: {sl_distance:.5f} | Max Loss: ${MAX_LOSS_DOLLARS}")
 
         filling_mode = mt5.ORDER_FILLING_IOC
         if symbol_info.filling_mode & mt5.ORDER_FILLING_FOK:
@@ -597,5 +636,11 @@ class AtlasBrain:
 # ============================================================
 
 if __name__ == "__main__":
+    # Pre-launch validation - ensures experts are trained before trading
+    TRADING_SYMBOLS = ['BTCUSD', 'ETHUSD']
+    if not validate_prelaunch(symbols=TRADING_SYMBOLS):
+        logging.error("Pre-launch validation failed. Exiting.")
+        sys.exit(1)
+
     brain = AtlasBrain()
     brain.run_loop()

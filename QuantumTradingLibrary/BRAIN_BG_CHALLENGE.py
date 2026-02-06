@@ -25,6 +25,13 @@ import torch
 import torch.nn as nn
 import MetaTrader5 as mt5
 
+# ETARE numpy expert (preferred for BTCUSD)
+try:
+    from etare_expert import load_etare_expert, prepare_etare_features
+    ETARE_AVAILABLE = True
+except ImportError:
+    ETARE_AVAILABLE = False
+
 # QuantumChildren network collection
 try:
     from entropy_collector import collect_signal, NODE_ID
@@ -44,20 +51,6 @@ logging.basicConfig(
 )
 
 # ============================================================
-# SINGLE ACCOUNT - DO NOT ADD OTHERS
-# ============================================================
-
-ACCOUNT = {
-    'account': 365060,
-    'password': ')8xaE(gAuU',
-    'server': 'BlueGuardian-Server',
-    'terminal_path': r"C:\Program Files\Blue Guardian MT5 Terminal 2\terminal64.exe",
-    'name': 'BlueGuardian $100K Challenge',
-    'symbols': ['BTCUSD'],
-    'magic_number': 365001,
-}
-
-# ============================================================
 # CONFIG FROM MASTER_CONFIG.json - DO NOT HARDCODE
 # ============================================================
 from config_loader import (
@@ -67,6 +60,36 @@ from config_loader import (
     CONFIDENCE_THRESHOLD
 )
 
+# Import credentials securely - passwords from .env file
+from credential_manager import get_credentials, CredentialError
+
+# Pre-launch validation
+from prelaunch_validator import validate_prelaunch
+
+# ============================================================
+# SINGLE ACCOUNT - Credentials from .env via credential_manager
+# ============================================================
+
+def _load_account():
+    """Load BG_CHALLENGE account with credentials from .env file."""
+    try:
+        creds = get_credentials('BG_CHALLENGE')
+        return {
+            'account': creds['account'],
+            'password': creds['password'],
+            'server': creds['server'],
+            'terminal_path': creds.get('terminal_path') or r"C:\Program Files\Blue Guardian MT5 Terminal 2\terminal64.exe",
+            'name': 'BlueGuardian $100K Challenge',
+            'symbols': creds.get('symbols', ['BTCUSD']),
+            'magic_number': creds.get('magic', 365001),
+        }
+    except CredentialError as e:
+        logging.error(f"Failed to load BG_CHALLENGE credentials: {e}")
+        logging.error("Please configure BG_CHALLENGE_PASSWORD in .env file")
+        sys.exit(1)
+
+ACCOUNT = _load_account()
+
 
 class Action(Enum):
     HOLD = 0
@@ -74,10 +97,8 @@ class Action(Enum):
     SELL = 2
 
 
-class Regime(Enum):
-    CLEAN = "CLEAN"
-    VOLATILE = "VOLATILE"
-    CHOPPY = "CHOPPY"
+# Regime enum and detect_regime from quantum bridge
+from quantum_regime_bridge import detect_regime, Regime
 
 
 # ============================================================
@@ -98,24 +119,6 @@ class LSTMModel(nn.Module):
         out = self.dropout(out[:, -1, :])
         out = self.fc(out)
         return out
-
-
-# ============================================================
-# REGIME DETECTOR
-# ============================================================
-
-def detect_regime(prices: np.ndarray) -> Tuple[Regime, float]:
-    import zlib
-    data_bytes = prices.astype(np.float32).tobytes()
-    compressed = zlib.compress(data_bytes, level=9)
-    ratio = len(data_bytes) / len(compressed)
-
-    if ratio >= 1.1:
-        return Regime.CLEAN, 0.96
-    elif ratio >= 0.9:
-        return Regime.VOLATILE, 0.88
-    else:
-        return Regime.CHOPPY, 0.75
 
 
 # ============================================================
@@ -180,7 +183,19 @@ class ExpertLoader:
         script_dir = Path(__file__).parent.absolute()
         self.experts_dir = script_dir / "top_50_experts"
         self.experts = {}
+        self.etare_experts = {}
+        self._load_etare_experts()
         self._load_experts()
+
+    def _load_etare_experts(self):
+        """Load ETARE numpy experts (preferred over LSTM when available)."""
+        if not ETARE_AVAILABLE:
+            return
+        for symbol in ['BTCUSD']:
+            expert = load_etare_expert(symbol)
+            if expert:
+                self.etare_experts[symbol] = expert
+                logging.info(f"ETARE expert loaded for {symbol} (WR={expert.win_rate*100:.1f}%)")
 
     def _load_experts(self):
         manifest_path = self.experts_dir / "top_50_manifest.json"
@@ -196,14 +211,22 @@ class ExpertLoader:
             symbol = entry['symbol'].upper()
             model_file = self.experts_dir / entry['filename']
             if model_file.exists():
-                model = LSTMModel(input_size=8)
+                model = LSTMModel(
+                    input_size=entry.get('input_size', 8),
+                    hidden_size=entry.get('hidden_size', 128),
+                    output_size=3,
+                    num_layers=2
+                )
                 model.load_state_dict(torch.load(model_file, map_location='cpu', weights_only=False))
                 model.eval()
                 self.experts[symbol] = model
-                logging.info(f"Loaded expert for {symbol}")
+                logging.info(f"Loaded LSTM expert for {symbol}")
 
     def get_expert(self, symbol: str):
         return self.experts.get(symbol.upper())
+
+    def get_etare_expert(self, symbol: str):
+        return self.etare_experts.get(symbol.upper())
 
 
 # ============================================================
@@ -249,24 +272,43 @@ class ChallengeTrader:
         return False
 
     def analyze(self, symbol: str) -> Tuple[Regime, float, Action, float]:
-        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 100)
-        if rates is None or len(rates) < 50:
+        # Regime detection uses M1 data
+        rates_m1 = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 100)
+        if rates_m1 is None or len(rates_m1) < 50:
             return Regime.CHOPPY, 0.0, Action.HOLD, 0.0
 
-        df = pd.DataFrame(rates)
-        df['time'] = pd.to_datetime(df['time'], unit='s')
-        prices = df['close'].values
+        df_m1 = pd.DataFrame(rates_m1)
+        df_m1['time'] = pd.to_datetime(df_m1['time'], unit='s')
+        prices = df_m1['close'].values
 
-        regime, fidelity = detect_regime(prices)
+        regime, fidelity = detect_regime(prices, symbol=symbol)
 
         if regime != Regime.CLEAN:
             return regime, fidelity, Action.HOLD, 0.0
 
+        # Try ETARE expert first (preferred for BTCUSD)
+        etare = self.expert_loader.get_etare_expert(symbol)
+        if etare and ETARE_AVAILABLE:
+            rates_m5 = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 0, 200)
+            if rates_m5 is not None and len(rates_m5) >= 60:
+                df_m5 = pd.DataFrame(rates_m5)
+                df_m5['time'] = pd.to_datetime(df_m5['time'], unit='s')
+                state = prepare_etare_features(df_m5)
+                if state is not None:
+                    direction, confidence = etare.predict(state)
+                    if confidence >= CONFIDENCE_THRESHOLD:
+                        if direction == "BUY":
+                            return regime, fidelity, Action.BUY, confidence
+                        elif direction == "SELL":
+                            return regime, fidelity, Action.SELL, confidence
+                    return regime, fidelity, Action.HOLD, confidence
+
+        # Fallback to LSTM expert
         expert = self.expert_loader.get_expert(symbol)
         if expert is None:
             return regime, fidelity, Action.HOLD, 0.0
 
-        features = prepare_features(df)
+        features = prepare_features(df_m1)
         if len(features) < 30:
             return regime, fidelity, Action.HOLD, 0.0
 
@@ -303,7 +345,9 @@ class ChallengeTrader:
         if tick is None:
             return False
 
-        lot = 0.01
+        lot = max(symbol_info.volume_min, 0.01)
+        lot = min(lot, symbol_info.volume_max)
+        lot = round(lot / symbol_info.volume_step) * symbol_info.volume_step
 
         tick_value = symbol_info.trade_tick_value
         tick_size = symbol_info.trade_tick_size
@@ -333,6 +377,12 @@ class ChallengeTrader:
             price = tick.bid
             sl = price + sl_distance
             tp = price - tp_distance
+
+        # Normalize SL/TP to symbol's price precision
+        digits = symbol_info.digits
+        sl = round(sl, digits)
+        tp = round(tp, digits)
+        price = round(price, digits)
 
         filling_mode = mt5.ORDER_FILLING_IOC
         if symbol_info.filling_mode & mt5.ORDER_FILLING_FOK:
@@ -412,4 +462,10 @@ def main():
 
 
 if __name__ == "__main__":
+    # Pre-launch validation - ensures experts are trained before trading
+    TRADING_SYMBOLS = ACCOUNT['symbols']
+    if not validate_prelaunch(symbols=TRADING_SYMBOLS):
+        logging.error("Pre-launch validation failed. Exiting.")
+        sys.exit(1)
+
     main()

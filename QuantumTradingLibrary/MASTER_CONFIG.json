@@ -1,28 +1,41 @@
 {
-    "VERSION": "1.0 - DO NOT DELETE THIS FILE",
+    "VERSION": "2.0 - SECURE (passwords moved to .env)",
     "LAST_UPDATED": "2026-02-04",
 
     "TRADING_SETTINGS": {
         "MAX_LOSS_DOLLARS": 1.00,
+        "INITIAL_SL_DOLLARS": 0.60,
         "TP_MULTIPLIER": 3.0,
         "ROLLING_SL_MULTIPLIER": 1.5,
-        "DYNAMIC_TP_PERCENT": 40,
+        "DYNAMIC_TP_PERCENT": 50,
+        "SET_DYNAMIC_TP": true,
+        "ROLLING_SL_ENABLED": true,
         "CONFIDENCE_THRESHOLD": 0.22,
         "AGENT_SL_MIN": 0.50,
         "AGENT_SL_MAX": 1.00,
         "WATCHDOG_LIMIT": 1.00,
-        "CHECK_INTERVAL_SECONDS": 30
+        "CHECK_INTERVAL_SECONDS": 30,
+        "REQUIRE_TRAINED_EXPERT": true
     },
 
     "REGIME_DETECTION": {
         "CLEAN_THRESHOLD": 1.1,
-        "VOLATILE_THRESHOLD": 0.9
+        "VOLATILE_THRESHOLD": 0.9,
+        "QUANTUM_BRIDGE": {
+            "ENABLED": true,
+            "ARCHIVER_DB_PATH": "BlueGuardian_Deploy/bg_archive.db",
+            "STALENESS_MINUTES": 30,
+            "MAX_ENTROPY": 3.0,
+            "CLEAN_ORDER_THRESHOLD": 0.55,
+            "VOLATILE_ORDER_THRESHOLD": 0.35,
+            "ENABLE_QUTIP_FALLBACK": true,
+            "WRITE_BACK_TO_ARCHIVER": true
+        }
     },
 
     "ACCOUNTS": {
         "BG_INSTANT": {
             "account": 366604,
-            "password": "YF^oHH&4Nm",
             "server": "BlueGuardian-Server",
             "terminal_path": "C:\\Program Files\\Blue Guardian MT5 Terminal\\terminal64.exe",
             "magic": 366001,
@@ -31,7 +44,6 @@
         },
         "BG_CHALLENGE": {
             "account": 365060,
-            "password": ")8xaE(gAuU",
             "server": "BlueGuardian-Server",
             "terminal_path": "C:\\Program Files\\Blue Guardian MT5 Terminal 2\\terminal64.exe",
             "magic": 365001,
@@ -40,38 +52,34 @@
         },
         "ATLAS": {
             "account": 212000584,
-            "password": "M6NLk79MN@",
             "server": "AtlasFunded-Server",
             "terminal_path": "C:\\Program Files\\Atlas Funded MT5 Terminal\\terminal64.exe",
             "magic": 212001,
-            "symbols": ["BTCUSD", "ETHUSD", "XAUUSD"],
+            "symbols": ["BTCUSD", "ETHUSD"],
             "enabled": true
         },
         "GL_1": {
             "account": 113326,
-            "password": "%bwN)IvJ5F",
             "server": "GetLeveraged-Trade",
             "terminal_path": null,
             "magic": 113001,
-            "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
+            "symbols": ["BTCUSD", "ETHUSD"],
             "enabled": true
         },
         "GL_2": {
             "account": 113328,
-            "password": "Y)wyDi1x3(",
             "server": "GetLeveraged-Trade",
             "terminal_path": null,
             "magic": 113002,
-            "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
+            "symbols": ["BTCUSD", "ETHUSD"],
             "enabled": true
         },
         "GL_3": {
             "account": 107245,
-            "password": "4i8SmoLd",
             "server": "GetLeveraged-Trade",
             "terminal_path": null,
             "magic": 107001,
-            "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
+            "symbols": ["BTCUSD", "ETHUSD"],
             "enabled": true
         }
     },
@@ -82,10 +90,11 @@
     },
 
     "NOTES": [
+        "PASSWORDS ARE NOW IN .env FILE - NOT HERE",
+        "Copy .env.example to .env and add your passwords",
+        "Use credential_manager.py to load credentials",
         "This file controls ALL trading scripts",
         "Edit values here - they apply everywhere",
-        "DO NOT hardcode values in Python scripts",
-        "MAX_LOSS_DOLLARS = max loss per trade in USD",
-        "TP_MULTIPLIER = take profit as multiple of SL"
+        "DO NOT hardcode values in Python scripts"
     ]
 }
