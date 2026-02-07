@@ -1,0 +1,52 @@
+{
+  "version": "TEQA-3.0-NEURAL-TE",
+  "symbol": "BTCUSD",
+  "timestamp": "2026-02-07T16:49:28.478198",
+  "elapsed_ms": 9294.935941696167,
+  "direction": -1,
+  "confidence": 0.5212121212121212,
+  "concordance": 0.30303030303030304,
+  "amplitude_sq": 0.002686202686202686,
+  "shock_score": 0.6304347401312755,
+  "shock_label": "CALM",
+  "n_neurons": 7,
+  "consensus_direction": -1,
+  "consensus_score": 1.0,
+  "vote_counts": {
+    "long": 0,
+    "short": 6,
+    "neutral": 1
+  },
+  "neural_consensus_pass": true,
+  "cross_instrument_corr": 0.0,
+  "relationship": "NO_DONOR",
+  "domestication_boost": 1.0,
+  "active_tes": [
+    "BEL_Pao",
+    "DIRS1",
+    "Ty3_gypsy",
+    "Ty5",
+    "Alu",
+    "LINE",
+    "RTE",
+    "VIPER_Ngaro",
+    "CACTA",
+    "I_element",
+    "Mavericks_Polinton",
+    "pogo",
+    "Rag_like",
+    "L1_Neuronal",
+    "piwiRNA_Neural"
+  ],
+  "n_active_class_i": 8,
+  "n_active_class_ii": 5,
+  "n_active_neural": 2,
+  "gates": {
+    "G7_neural_consensus": true,
+    "G8_genomic_shock": true,
+    "G9_speciation": true,
+    "G10_domestication": true
+  },
+  "te_activation_count": 33,
+  "neuron_count": 7
+}

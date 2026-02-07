@@ -1,0 +1,389 @@
+{
+  "run_id": "20260207_153941",
+  "te_activations": [
+    {
+      "te": "BEL_Pao",
+      "strength": 1.0,
+      "direction": 1,
+      "details": {
+        "strength": 1.0,
+        "direction": 1
+      }
+    },
+    {
+      "te": "DIRS1",
+      "strength": 1.0,
+      "direction": 1,
+      "details": {
+        "strength": 1.0,
+        "direction": 1
+      }
+    },
+    {
+      "te": "Ty1_copia",
+      "strength": 0.9988037801286453,
+      "direction": 1,
+      "details": {
+        "strength": 0.9988037801286453,
+        "direction": 1
+      }
+    },
+    {
+      "te": "Ty3_gypsy",
+      "strength": 1.0,
+      "direction": 1,
+      "details": {
+        "strength": 1.0,
+        "direction": 1
+      }
+    },
+    {
+      "te": "Ty5",
+      "strength": 1.0,
+      "direction": 1,
+      "details": {
+        "strength": 1.0,
+        "direction": 1
+      }
+    },
+    {
+      "te": "Alu",
+      "strength": 0.0,
+      "direction": 1,
+      "details": {
+        "strength": 0.0,
+        "direction": 1
+      }
+    },
+    {
+      "te": "LINE",
+      "strength": 0.8,
+      "direction": 1,
+      "details": {
+        "strength": 0.8,
+        "direction": 1
+      }
+    },
+    {
+      "te": "Penelope",
+      "strength": 1.0,
+      "direction": 1,
+      "details": {
+        "strength": 1.0,
+        "direction": 1
+      }
+    },
+    {
+      "te": "RTE",
+      "strength": 0.8989310590152235,
+      "direction": -1,
+      "details": {
+        "strength": 0.8989310590152235,
+        "direction": -1
+      }
+    },
+    {
+      "te": "SINE",
+      "strength": 0.0,
+      "direction": 0,
+      "details": {
+        "strength": 0.0,
+        "direction": 0
+      }
+    },
+    {
+      "te": "VIPER_Ngaro",
+      "strength": 0.3,
+      "direction": 0,
+      "details": {
+        "strength": 0.3,
+        "direction": 0
+      }
+    },
+    {
+      "te": "CACTA",
+      "strength": 0.5861047559586039,
+      "direction": 1,
+      "details": {
+        "strength": 0.5861047559586039,
+        "direction": 1
+      }
+    },
+    {
+      "te": "Crypton",
+      "strength": 1.0,
+      "direction": 1,
+      "details": {
+        "strength": 1.0,
+        "direction": 1
+      }
+    },
+    {
+      "te": "Helitron",
+      "strength": 0.9761791361574987,
+      "direction": 1,
+      "details": {
+        "strength": 0.9761791361574987,
+        "direction": 1
+      }
+    },
+    {
+      "te": "hobo",
+      "strength": 0.4837160469736516,
+      "direction": 1,
+      "details": {
+        "strength": 0.4837160469736516,
+        "direction": 1
+      }
+    },
+    {
+      "te": "I_element",
+      "strength": 1.0,
+      "direction": 1,
+      "details": {
+        "strength": 1.0,
+        "direction": 1
+      }
+    },
+    {
+      "te": "Mariner_Tc1",
+      "strength": 0.9104579229384084,
+      "direction": 1,
+      "details": {
+        "strength": 0.9104579229384084,
+        "direction": 1
+      }
+    },
+    {
+      "te": "Mavericks_Polinton",
+      "strength": 0.03996943963551994,
+      "direction": 1,
+      "details": {
+        "strength": 0.03996943963551994,
+        "direction": 1
+      }
+    },
+    {
+      "te": "Mutator",
+      "strength": 0.0,
+      "direction": 1,
+      "details": {
+        "strength": 0.0,
+        "direction": 1
+      }
+    },
+    {
+      "te": "P_element",
+      "strength": 1.0,
+      "direction": 1,
+      "details": {
+        "strength": 1.0,
+        "direction": 1
+      }
+    },
+    {
+      "te": "PIF_Harbinger",
+      "strength": 0.0,
+      "direction": 1,
+      "details": {
+        "strength": 0.0,
+        "direction": 1
+      }
+    },
+    {
+      "te": "piggyBac",
+      "strength": 0.26222416440046636,
+      "direction": 1,
+      "details": {
+        "strength": 0.26222416440046636,
+        "direction": 1
+      }
+    },
+    {
+      "te": "pogo",
+      "strength": 0.0,
+      "direction": 1,
+      "details": {
+        "strength": 0.0,
+        "direction": 1
+      }
+    },
+    {
+      "te": "Rag_like",
+      "strength": 0.5,
+      "direction": 1,
+      "details": {
+        "strength": 0.5,
+        "direction": 1
+      }
+    },
+    {
+      "te": "Transib",
+      "strength": 0.02382086384250126,
+      "direction": 0,
+      "details": {
+        "strength": 0.02382086384250126,
+        "direction": 0
+      }
+    }
+  ],
+  "quantum_states": [
+    {
+      "n_shots": 4096,
+      "n_unique_states": 206,
+      "n_possible_states": 33554432,
+      "coverage": 6.139278411865234e-06,
+      "shannon_entropy": 5.776028369691614,
+      "max_entropy": 25.0,
+      "novelty": 0.23104113478766458,
+      "circuit_depth": 13,
+      "top_10": [
+        [
+          "0001011011011000101010101",
+          257
+        ],
+        [
+          "0001001011111000101010101",
+          255
+        ],
+        [
+          "0101001011011000101010101",
+          240
+        ],
+        [
+          "1101001011011000101010101",
+          218
+        ],
+        [
+          "0101011011111000111010101",
+          201
+        ],
+        [
+          "1001011011011000101010101",
+          187
+        ],
+        [
+          "1001001011111000101010101",
+          182
+        ],
+        [
+          "1101011011111000111010101",
+          169
+        ],
+        [
+          "0001000011111100101010101",
+          133
+        ],
+        [
+          "0001010011011100101010101",
+          126
+        ]
+      ],
+      "bottom_10": [
+        [
+          "1100001101011100101010101",
+          1
+        ],
+        [
+          "0100011001111100011010101",
+          1
+        ],
+        [
+          "1000010011010100110010101",
+          1
+        ],
+        [
+          "0101010001111000111010101",
+          1
+        ],
+        [
+          "0000001011110010110010101",
+          1
+        ],
+        [
+          "0101001001011110101010101",
+          1
+        ],
+        [
+          "0100000111011100101010101",
+          1
+        ],
+        [
+          "0101001011001100101010101",
+          1
+        ],
+        [
+          "1101001011010010110010101",
+          1
+        ],
+        [
+          "1001001011101100101010101",
+          1
+        ]
+      ],
+      "state_distribution": {
+        "singles": 65,
+        "doubles": 27,
+        "heavy": 4
+      }
+    }
+  ],
+  "signals": [
+    {
+      "jardines_gate": {
+        "direction": 1,
+        "confidence": 0.795107448517127,
+        "entropy_adj": 0.0,
+        "interference": 1.0,
+        "amplitude_sq": 0.062744140625
+      },
+      "position": {
+        "lot_scale": 0.7,
+        "amplified": true
+      },
+      "filters": {
+        "pirna_silenced": false,
+        "shock_active": false,
+        "threshold_mult": 1.0,
+        "ectopic_inversion": false
+      },
+      "quantum": {
+        "novelty": 0.23104113478766458,
+        "bitstring": "0001011011011000101010101",
+        "measurement_entropy": 5.776028369691614,
+        "n_states": 206,
+        "n_active_qubits": 12,
+        "vote_long": 8.94766500362502,
+        "vote_short": 0.8989310590152235,
+        "elapsed_ms": 1376.5499591827393
+      },
+      "timestamp": "2026-02-07T15:39:42.578186",
+      "version": "TEQA-2.0-FULL-SPECTRUM"
+    }
+  ],
+  "mutations": [
+    {
+      "pre": {
+        "direction": 1,
+        "confidence": 0.5912082867620208,
+        "active_tes": 16
+      },
+      "post": {
+        "direction": 1,
+        "confidence": 0.795107448517127,
+        "active_tes": 12
+      },
+      "changes": {
+        "confidence": {
+          "before": 0.5912082867620208,
+          "after": 0.795107448517127
+        },
+        "active_tes": {
+          "before": 16,
+          "after": 12
+        }
+      }
+    }
+  ],
+  "event_count": 29
+}

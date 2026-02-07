@@ -1,0 +1,40 @@
+============================================================================
+  TEQA v3.0 NEURAL-TE ANALYTICS REPORT
+  Run ID: 20260207_164851
+  Duration: 9048ms
+============================================================================
+
+  GENOMIC SHOCK: CALM (score=0.68)
+
+  NEURAL MOSAIC (7 neurons)
+  ----------------------------------------------------------------------
+  LONG: 0  SHORT: 7  NEUTRAL: 0
+  Consensus: 1.000 -> PASS
+
+  TE ACTIVATION SUMMARY
+  ----------------------------------------------------------------------
+  Class I  (Retrotransposons): 7 active
+  Class II (DNA Transposons):   5 active
+  Neural:                       2 active
+
+  SPECIATION
+  ----------------------------------------------------------------------
+  Correlation: 0.000
+  Relationship: NO_DONOR
+
+  GATE CHECKS (G7-G10)
+  ----------------------------------------------------------------------
+  G7_neural_consensus: PASS
+  G8_genomic_shock: PASS
+  G9_speciation: PASS
+  G10_domestication: PASS
+
+  FINAL SIGNAL
+  ----------------------------------------------------------------------
+  Direction:    SHORT
+  Confidence:   0.4970
+  Concordance:  0.2424
+  Domestication boost: 1.00
+  Amplitude sq: 0.0021
+
+============================================================================

@@ -58,6 +58,11 @@ logging.basicConfig(
 from config_loader import (
     MAX_LOSS_DOLLARS,
     TP_MULTIPLIER,
+    ROLLING_SL_MULTIPLIER,
+    DYNAMIC_TP_PERCENT,
+    SET_DYNAMIC_TP,
+    ROLLING_SL_ENABLED,
+    ATR_MULTIPLIER,
     CHECK_INTERVAL_SECONDS as CHECK_INTERVAL,
     CONFIDENCE_THRESHOLD
 )
@@ -67,6 +72,13 @@ from credential_manager import get_credentials, CredentialError
 
 # Pre-launch validation
 from prelaunch_validator import validate_prelaunch
+
+# TEQA quantum signal bridge
+try:
+    from teqa_bridge import TEQABridge
+    TEQA_ENABLED = True
+except ImportError:
+    TEQA_ENABLED = False
 
 # ============================================================
 # SINGLE ACCOUNT - Credentials from .env via credential_manager
@@ -186,8 +198,11 @@ class ExpertLoader:
         self.experts_dir = script_dir / "top_50_experts"
         self.experts = {}
         self.etare_experts = {}
+        self._etare_mtimes = {}
+        self._manifest_mtime = 0.0
         self._load_etare_experts()
         self._load_experts()
+        self._record_initial_mtimes()
 
     def _load_etare_experts(self):
         """Load ETARE numpy experts (preferred over LSTM when available)."""
@@ -230,6 +245,53 @@ class ExpertLoader:
     def get_etare_expert(self, symbol: str):
         return self.etare_experts.get(symbol.upper())
 
+    def _etare_json_path(self, symbol: str) -> Path:
+        script_dir = Path(__file__).parent.absolute()
+        return script_dir / "ETARE_QuantumFusion" / "models" / f"{symbol.lower()}_etare_expert.json"
+
+    def _record_initial_mtimes(self):
+        """Record file modification times after initial load."""
+        for symbol in ['BTCUSD']:
+            p = self._etare_json_path(symbol)
+            if p.exists():
+                self._etare_mtimes[symbol] = p.stat().st_mtime
+        manifest_path = self.experts_dir / "top_50_manifest.json"
+        if manifest_path.exists():
+            self._manifest_mtime = manifest_path.stat().st_mtime
+
+    def check_for_updates(self):
+        """Check if expert files have been modified and hot-reload if needed."""
+        # Check ETARE experts
+        for symbol in list(self._etare_mtimes.keys()) + ['BTCUSD']:
+            p = self._etare_json_path(symbol)
+            if not p.exists():
+                continue
+            current_mtime = p.stat().st_mtime
+            old_mtime = self._etare_mtimes.get(symbol, 0.0)
+            if current_mtime > old_mtime:
+                try:
+                    if ETARE_AVAILABLE:
+                        expert = load_etare_expert(symbol)
+                        if expert:
+                            self.etare_experts[symbol] = expert
+                            self._etare_mtimes[symbol] = current_mtime
+                            logging.info(f"HOT-RELOAD: ETARE expert for {symbol} reloaded (WR={expert.win_rate*100:.1f}%)")
+                except Exception as e:
+                    logging.warning(f"HOT-RELOAD: Failed to reload ETARE {symbol}: {e}")
+
+        # Check LSTM manifest
+        manifest_path = self.experts_dir / "top_50_manifest.json"
+        if manifest_path.exists():
+            current_mtime = manifest_path.stat().st_mtime
+            if current_mtime > self._manifest_mtime:
+                try:
+                    self.experts.clear()
+                    self._load_experts()
+                    self._manifest_mtime = current_mtime
+                    logging.info("HOT-RELOAD: LSTM experts reloaded from updated manifest")
+                except Exception as e:
+                    logging.warning(f"HOT-RELOAD: Failed to reload LSTM experts: {e}")
+
 
 # ============================================================
 # MAIN TRADING LOGIC
@@ -238,6 +300,7 @@ class ExpertLoader:
 class InstantTrader:
     def __init__(self):
         self.expert_loader = ExpertLoader()
+        self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
         self.connected = False
 
     def connect(self) -> bool:
@@ -350,20 +413,25 @@ class InstantTrader:
         if tick is None:
             return False
 
-        # Volume validation
-        lot = max(symbol_info.volume_min, 0.01)
-        lot = min(lot, symbol_info.volume_max)
-        lot = round(lot / symbol_info.volume_step) * symbol_info.volume_step
-
-        # FIXED DOLLAR SL
         tick_value = symbol_info.trade_tick_value
         tick_size = symbol_info.trade_tick_size
         point = symbol_info.point
         stops_level = symbol_info.trade_stops_level
 
-        if tick_value > 0 and lot > 0:
-            sl_ticks = MAX_LOSS_DOLLARS / (tick_value * lot)
-            sl_distance = sl_ticks * tick_size
+        # ATR-based SL distance: let volatility set the distance,
+        # then size the lot so max loss = $1
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 0, 20)
+        if rates is not None and len(rates) >= 14:
+            df_atr = pd.DataFrame(rates)
+            tr = np.maximum(
+                df_atr['high'] - df_atr['low'],
+                np.maximum(
+                    abs(df_atr['high'] - df_atr['close'].shift(1)),
+                    abs(df_atr['low'] - df_atr['close'].shift(1))
+                )
+            )
+            atr = tr.rolling(14).mean().iloc[-1]
+            sl_distance = atr * ATR_MULTIPLIER
         else:
             sl_distance = 50 * point
 
@@ -372,6 +440,20 @@ class InstantTrader:
         if sl_distance < min_sl_distance:
             sl_distance = min_sl_distance
 
+        # Calculate lot size to keep loss at exactly MAX_LOSS_DOLLARS
+        sl_ticks = sl_distance / tick_size
+        if tick_value > 0 and sl_ticks > 0:
+            lot = MAX_LOSS_DOLLARS / (sl_ticks * tick_value)
+        else:
+            lot = symbol_info.volume_min
+
+        # Clamp lot to broker limits and round to step
+        lot = max(symbol_info.volume_min, lot)
+        lot = min(lot, symbol_info.volume_max)
+        lot = round(lot / symbol_info.volume_step) * symbol_info.volume_step
+        lot = max(symbol_info.volume_min, lot)  # Ensure not zero after rounding
+
+        # TP = SL distance * 3 (ceiling), dynamic TP closes at 50% ($1.50)
         tp_distance = sl_distance * TP_MULTIPLIER
 
         if action == Action.BUY:
@@ -385,7 +467,6 @@ class InstantTrader:
             sl = price + sl_distance
             tp = price - tp_distance
 
-        # Normalize SL/TP to symbol's price precision
         digits = symbol_info.digits
         sl = round(sl, digits)
         tp = round(tp, digits)
@@ -411,16 +492,147 @@ class InstantTrader:
 
         result = mt5.order_send(request)
         if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-            logging.info(f"TRADE: {action.name} {symbol} @ {price:.2f} | SL: ${MAX_LOSS_DOLLARS} | TP: ${MAX_LOSS_DOLLARS * TP_MULTIPLIER}")
+            logging.info(f"TRADE: {action.name} {symbol} @ {price:.2f} | SL: ${MAX_LOSS_DOLLARS} | TP: ${MAX_LOSS_DOLLARS * TP_MULTIPLIER} | Dyn TP at {DYNAMIC_TP_PERCENT}%")
             return True
         else:
             logging.error(f"TRADE FAILED: {result.comment if result else 'None'}")
             return False
 
+    def manage_positions(self):
+        """Active position management: rolling SL + dynamic TP."""
+        positions = mt5.positions_get()
+        if not positions:
+            return
+
+        for pos in positions:
+            if pos.magic != ACCOUNT['magic_number']:
+                continue
+
+            symbol_info = mt5.symbol_info(pos.symbol)
+            if symbol_info is None:
+                continue
+
+            tick = mt5.symbol_info_tick(pos.symbol)
+            if tick is None:
+                continue
+
+            digits = symbol_info.digits
+            point = symbol_info.point
+            stops_level = symbol_info.trade_stops_level
+            min_distance = (stops_level + 10) * point
+
+            # Current SL distance from entry
+            if pos.type == 0:  # BUY
+                current_price = tick.bid
+                entry_sl_distance = pos.price_open - pos.sl if pos.sl > 0 else 0
+                current_profit_distance = current_price - pos.price_open
+            else:  # SELL
+                current_price = tick.ask
+                entry_sl_distance = pos.sl - pos.price_open if pos.sl > 0 else 0
+                current_profit_distance = pos.price_open - current_price
+
+            if entry_sl_distance <= 0:
+                continue
+
+            # TP target = SL distance * TP_MULTIPLIER
+            tp_target_distance = entry_sl_distance * TP_MULTIPLIER
+            # Dynamic TP threshold = DYNAMIC_TP_PERCENT% of the TP target
+            dynamic_tp_threshold = tp_target_distance * (DYNAMIC_TP_PERCENT / 100.0)
+
+            # --- DYNAMIC TP: consult expert before closing ---
+            if SET_DYNAMIC_TP and current_profit_distance >= dynamic_tp_threshold:
+                # Ask ETARE expert if the trend supports holding
+                should_hold = False
+                etare = self.expert_loader.get_etare_expert(pos.symbol)
+                if etare and ETARE_AVAILABLE:
+                    rates_m5 = mt5.copy_rates_from_pos(pos.symbol, mt5.TIMEFRAME_M5, 0, 200)
+                    if rates_m5 is not None and len(rates_m5) >= 60:
+                        df_m5 = pd.DataFrame(rates_m5)
+                        df_m5['time'] = pd.to_datetime(df_m5['time'], unit='s')
+                        state = prepare_etare_features(df_m5)
+                        if state is not None:
+                            direction, confidence = etare.predict(state)
+                            pos_direction = "BUY" if pos.type == 0 else "SELL"
+                            if direction == pos_direction and confidence >= CONFIDENCE_THRESHOLD:
+                                should_hold = True
+                                logging.info(
+                                    f"EXPERT HOLD: {pos.symbol} #{pos.ticket} | "
+                                    f"Expert says {direction} ({confidence:.2f}) - riding the trend"
+                                )
+
+                if not should_hold:
+                    # Expert says close or no expert - take the dynamic TP
+                    close_type = mt5.ORDER_TYPE_SELL if pos.type == 0 else mt5.ORDER_TYPE_BUY
+                    close_price = tick.bid if pos.type == 0 else tick.ask
+                    request = {
+                        "action": mt5.TRADE_ACTION_DEAL,
+                        "symbol": pos.symbol,
+                        "volume": pos.volume,
+                        "type": close_type,
+                        "position": pos.ticket,
+                        "price": round(close_price, digits),
+                        "magic": ACCOUNT['magic_number'],
+                        "comment": "DYN_TP",
+                        "type_time": mt5.ORDER_TIME_GTC,
+                        "type_filling": mt5.ORDER_FILLING_IOC,
+                    }
+                    result = mt5.order_send(request)
+                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                        logging.info(f"DYNAMIC TP: Closed {pos.symbol} #{pos.ticket} | Profit: ${pos.profit:.2f}")
+                    continue
+                # Expert says hold - fall through to rolling SL to trail and protect
+
+            # --- ROLLING SL + TP TRAIL: maintain 3:1 ratio as price moves ---
+            if ROLLING_SL_ENABLED and current_profit_distance > 0:
+                rolled_sl_distance = entry_sl_distance / ROLLING_SL_MULTIPLIER
+
+                if pos.type == 0:  # BUY
+                    new_sl = current_price - rolled_sl_distance
+                    new_sl = max(new_sl, pos.price_open)  # At least breakeven
+                    if new_sl - tick.bid > -min_distance:
+                        new_sl = tick.bid - min_distance
+                    if pos.sl > 0 and new_sl <= pos.sl:
+                        continue  # Don't move SL backward
+                    # Move TP forward to maintain 3:1 from new SL
+                    risk_from_sl = current_price - new_sl
+                    new_tp = current_price + (risk_from_sl * TP_MULTIPLIER)
+                    new_tp = max(new_tp, pos.tp) if pos.tp > 0 else new_tp
+                else:  # SELL
+                    new_sl = current_price + rolled_sl_distance
+                    new_sl = min(new_sl, pos.price_open)
+                    if tick.ask - new_sl > -min_distance:
+                        new_sl = tick.ask + min_distance
+                    if pos.sl > 0 and new_sl >= pos.sl:
+                        continue  # Don't move SL backward
+                    # Move TP forward to maintain 3:1 from new SL
+                    risk_from_sl = new_sl - current_price
+                    new_tp = current_price - (risk_from_sl * TP_MULTIPLIER)
+                    new_tp = min(new_tp, pos.tp) if pos.tp > 0 else new_tp
+
+                new_sl = round(new_sl, digits)
+                new_tp = round(new_tp, digits)
+
+                if new_sl != round(pos.sl, digits) or new_tp != round(pos.tp, digits):
+                    request = {
+                        "action": mt5.TRADE_ACTION_SLTP,
+                        "symbol": pos.symbol,
+                        "position": pos.ticket,
+                        "sl": new_sl,
+                        "tp": new_tp,
+                    }
+                    result = mt5.order_send(request)
+                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                        logging.info(f"TRAIL: {pos.symbol} #{pos.ticket} SL -> {new_sl:.2f} | TP -> {new_tp:.2f}")
+
     def run_cycle(self):
+        self.expert_loader.check_for_updates()
+
         if not self.connect():
             logging.error("Connection lost - will retry next cycle")
             return
+
+        # Manage existing positions first (dynamic TP + rolling SL)
+        self.manage_positions()
 
         for symbol in ACCOUNT['symbols']:
             regime, fidelity, action, confidence = self.analyze(symbol)
@@ -430,7 +642,6 @@ class InstantTrader:
 
             logging.info(f"[{symbol}] {regime.value} | {action.name} ({confidence:.2f})")
 
-            # Send to network
             if COLLECTION_ENABLED:
                 try:
                     collect_signal({
@@ -446,6 +657,15 @@ class InstantTrader:
                 except:
                     pass
 
+            # Apply TEQA quantum signal
+            if self.teqa_bridge is not None and action is not None:
+                final_act, final_conf, lot_mult, teqa_reason = \
+                    self.teqa_bridge.apply_to_lstm(action.name, confidence)
+                action_map = {'BUY': Action.BUY, 'SELL': Action.SELL, 'HOLD': Action.HOLD}
+                action = action_map.get(final_act, Action.HOLD)
+                confidence = final_conf
+                logging.info(f"[{symbol}] {teqa_reason}")
+
             if regime == Regime.CLEAN and action in [Action.BUY, Action.SELL]:
                 self.execute_trade(symbol, action)
 
@@ -454,7 +674,7 @@ def main():
     print("=" * 60)
     print("  BLUEGUARDIAN INSTANT - DEDICATED")
     print(f"  Account: {ACCOUNT['account']} ({ACCOUNT['name']})")
-    print(f"  SL: ${MAX_LOSS_DOLLARS} | TP: ${MAX_LOSS_DOLLARS * TP_MULTIPLIER}")
+    print(f"  SL: ${MAX_LOSS_DOLLARS} | Dynamic TP: {DYNAMIC_TP_PERCENT}% of {TP_MULTIPLIER}x | Rolling SL: {ROLLING_SL_MULTIPLIER}x")
     print("=" * 60)
     print()
     print("  THIS SCRIPT RUNS ALONE - DO NOT RUN BRAIN_BLUEGUARDIAN.py")

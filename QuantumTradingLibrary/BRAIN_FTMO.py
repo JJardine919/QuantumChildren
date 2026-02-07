@@ -1,12 +1,17 @@
 """
-QUANTUM BRAIN - BLUEGUARDIAN CHALLENGE ONLY
-============================================
-DEDICATED script for $100K Challenge account ONLY.
+QUANTUM BRAIN - FTMO CHALLENGE ONLY
+====================================
+DEDICATED script for FTMO $200K Challenge account ONLY.
 Runs independently - does NOT touch other accounts.
 
-Account: 365060 (BlueGuardian $100K Challenge)
+Account: 1521063483 (FTMO $200K Challenge)
 
-Run: python BRAIN_BG_CHALLENGE.py
+FTMO-SPECIFIC OVERRIDES:
+  - Risk per trade: $150 (not $1 - scaled for $200K account)
+  - ATR multiplier: 0.5 (wider stops, lot adjusts to keep $150 risk)
+  These are NOT in MASTER_CONFIG.json because they only apply to FTMO.
+
+Run: python BRAIN_FTMO.py
 """
 
 import sys
@@ -42,16 +47,17 @@ except ImportError:
 
 logging.basicConfig(
     level=logging.INFO,
-    format='[%(asctime)s][BG_CHALLENGE] %(message)s',
+    format='[%(asctime)s][FTMO] %(message)s',
     datefmt='%H:%M:%S',
     handlers=[
-        logging.FileHandler('brain_bg_challenge.log'),
+        logging.FileHandler('brain_ftmo.log'),
         logging.StreamHandler()
     ]
 )
 
 # ============================================================
 # CONFIG FROM MASTER_CONFIG.json - DO NOT HARDCODE
+# (except FTMO-specific overrides below)
 # ============================================================
 from config_loader import (
     MAX_LOSS_DOLLARS,
@@ -64,6 +70,16 @@ from config_loader import (
     CHECK_INTERVAL_SECONDS as CHECK_INTERVAL,
     CONFIDENCE_THRESHOLD
 )
+
+# ============================================================
+# FTMO-SPECIFIC OVERRIDES
+# The $200K FTMO account needs different risk sizing than the
+# $5K Blue Guardian accounts. These values were determined by
+# Monte Carlo simulation (CHALLENGE_SIMULATOR.py):
+#   $150 risk + ATR=0.5 -> 99.4% pass rate, zero breaches
+# ============================================================
+FTMO_RISK_PER_TRADE = 150.0   # $150 per trade (not $1)
+FTMO_ATR_MULTIPLIER = 0.5     # Wider ATR stops (not 0.0438)
 
 # Import credentials securely - passwords from .env file
 from credential_manager import get_credentials, CredentialError
@@ -83,21 +99,21 @@ except ImportError:
 # ============================================================
 
 def _load_account():
-    """Load BG_CHALLENGE account with credentials from .env file."""
+    """Load FTMO account with credentials from .env file."""
     try:
-        creds = get_credentials('BG_CHALLENGE')
+        creds = get_credentials('FTMO')
         return {
             'account': creds['account'],
             'password': creds['password'],
             'server': creds['server'],
-            'terminal_path': creds.get('terminal_path') or r"C:\Program Files\Blue Guardian MT5 Terminal 2\terminal64.exe",
-            'name': 'BlueGuardian $100K Challenge',
-            'symbols': creds.get('symbols', ['BTCUSD']),
-            'magic_number': creds.get('magic', 365001),
+            'terminal_path': creds.get('terminal_path') or r"C:\Program Files\FTMO Global Markets MT5 Terminal\terminal64.exe",
+            'name': 'FTMO $200K Challenge',
+            'symbols': creds.get('symbols', ['BTCUSD', 'XAUUSD', 'ETHUSD']),
+            'magic_number': creds.get('magic', 152001),
         }
     except CredentialError as e:
-        logging.error(f"Failed to load BG_CHALLENGE credentials: {e}")
-        logging.error("Please configure BG_CHALLENGE_PASSWORD in .env file")
+        logging.error(f"Failed to load FTMO credentials: {e}")
+        logging.error("Please configure FTMO_PASSWORD in .env file")
         sys.exit(1)
 
 ACCOUNT = _load_account()
@@ -295,7 +311,7 @@ class ExpertLoader:
 # MAIN TRADING LOGIC
 # ============================================================
 
-class ChallengeTrader:
+class FTMOTrader:
     def __init__(self):
         self.expert_loader = ExpertLoader()
         self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
@@ -413,8 +429,7 @@ class ChallengeTrader:
         point = symbol_info.point
         stops_level = symbol_info.trade_stops_level
 
-        # ATR-based SL distance: let volatility set the distance,
-        # then size the lot so max loss = $1
+        # ATR-based SL distance using FTMO-specific ATR multiplier
         rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 0, 20)
         if rates is not None and len(rates) >= 14:
             df_atr = pd.DataFrame(rates)
@@ -426,7 +441,7 @@ class ChallengeTrader:
                 )
             )
             atr = tr.rolling(14).mean().iloc[-1]
-            sl_distance = atr * ATR_MULTIPLIER
+            sl_distance = atr * FTMO_ATR_MULTIPLIER
         else:
             sl_distance = 50 * point
 
@@ -435,10 +450,10 @@ class ChallengeTrader:
         if sl_distance < min_sl_distance:
             sl_distance = min_sl_distance
 
-        # Calculate lot size to keep loss at exactly MAX_LOSS_DOLLARS
+        # Calculate lot size to keep loss at exactly FTMO_RISK_PER_TRADE
         sl_ticks = sl_distance / tick_size
         if tick_value > 0 and sl_ticks > 0:
-            lot = MAX_LOSS_DOLLARS / (sl_ticks * tick_value)
+            lot = FTMO_RISK_PER_TRADE / (sl_ticks * tick_value)
         else:
             lot = symbol_info.volume_min
 
@@ -480,14 +495,14 @@ class ChallengeTrader:
             "sl": sl,
             "tp": tp,
             "magic": ACCOUNT['magic_number'],
-            "comment": "BG_CHALLENGE",
+            "comment": "FTMO_BRAIN",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": filling_mode,
         }
 
         result = mt5.order_send(request)
         if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-            logging.info(f"TRADE: {action.name} {symbol} @ {price:.2f} | SL: ${MAX_LOSS_DOLLARS} | TP: ${MAX_LOSS_DOLLARS * TP_MULTIPLIER} | Dyn TP at {DYNAMIC_TP_PERCENT}%")
+            logging.info(f"TRADE: {action.name} {symbol} @ {price:.2f} | Lot: {lot:.3f} | SL: ${FTMO_RISK_PER_TRADE} | TP: ${FTMO_RISK_PER_TRADE * TP_MULTIPLIER} | Dyn TP at {DYNAMIC_TP_PERCENT}%")
             return True
         else:
             logging.error(f"TRADE FAILED: {result.comment if result else 'None'}")
@@ -644,7 +659,7 @@ class ChallengeTrader:
                         'dominant_state': fidelity,
                         'price': price,
                         'regime': regime.value,
-                        'source': 'BG_CHALLENGE'
+                        'source': 'FTMO'
                     })
                 except:
                     pass
@@ -664,12 +679,13 @@ class ChallengeTrader:
 
 def main():
     print("=" * 60)
-    print("  BLUEGUARDIAN CHALLENGE - DEDICATED")
+    print("  FTMO CHALLENGE - DEDICATED")
     print(f"  Account: {ACCOUNT['account']} ({ACCOUNT['name']})")
-    print(f"  SL: ${MAX_LOSS_DOLLARS} | TP: ${MAX_LOSS_DOLLARS * TP_MULTIPLIER} | Dyn TP: {DYNAMIC_TP_PERCENT}% | Rolling SL: {ROLLING_SL_MULTIPLIER}x")
+    print(f"  Risk: ${FTMO_RISK_PER_TRADE}/trade | ATR mult: {FTMO_ATR_MULTIPLIER}")
+    print(f"  TP: {TP_MULTIPLIER}x | Dyn TP: {DYNAMIC_TP_PERCENT}% | Rolling SL: {ROLLING_SL_MULTIPLIER}x")
     print("=" * 60)
 
-    trader = ChallengeTrader()
+    trader = FTMOTrader()
 
     try:
         while True:

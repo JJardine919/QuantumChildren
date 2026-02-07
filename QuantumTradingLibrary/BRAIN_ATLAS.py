@@ -58,6 +58,13 @@ from credential_manager import get_credentials, CredentialError
 # Pre-launch validation
 from prelaunch_validator import validate_prelaunch
 
+# TEQA quantum signal bridge
+try:
+    from teqa_bridge import TEQABridge
+    TEQA_ENABLED = True
+except ImportError:
+    TEQA_ENABLED = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -174,7 +181,9 @@ class ExpertLoader:
             self.experts_dir = Path(experts_dir)
         self.manifest = None
         self.loaded_experts: Dict[str, nn.Module] = {}
+        self._manifest_mtime = 0.0
         self._load_manifest()
+        self._record_initial_mtime()
 
     def _load_manifest(self):
         manifest_path = self.experts_dir / "top_50_manifest.json"
@@ -186,13 +195,31 @@ class ExpertLoader:
         else:
             logging.error(f"Expert manifest NOT FOUND at {manifest_path}")
 
-    def get_best_expert_for_symbol(self, symbol: str) -> Optional[nn.Module]:
+    def get_best_expert_for_symbol(self, symbol: str, prefer_mutant: bool = True) -> Optional[nn.Module]:
         if not self.manifest:
             return None
         for expert in self.manifest['experts']:
             if expert['symbol'] == symbol:
+                if prefer_mutant:
+                    mutant = self._try_load_mutant(expert)
+                    if mutant is not None:
+                        return mutant
                 return self._load_expert(expert)
         return None
+
+    def _try_load_mutant(self, expert_info: dict) -> Optional[nn.Module]:
+        """Try to load a _MUTANT.pth variant if it exists."""
+        base = expert_info['filename'].replace('.pth', '')
+        mutant_filename = f"{base}_MUTANT.pth"
+        mutant_path = self.experts_dir / mutant_filename
+        if not mutant_path.exists():
+            return None
+        mutant_info = dict(expert_info)
+        mutant_info['filename'] = mutant_filename
+        model = self._load_expert(mutant_info)
+        if model is not None:
+            logging.info(f"Loaded MUTANT expert: {mutant_filename}")
+        return model
 
     def _load_expert(self, expert_info: dict) -> Optional[nn.Module]:
         filename = expert_info['filename']
@@ -218,6 +245,27 @@ class ExpertLoader:
         except Exception as e:
             logging.error(f"Failed to load expert: {e}")
             return None
+
+    def _record_initial_mtime(self):
+        """Record manifest modification time after initial load."""
+        manifest_path = self.experts_dir / "top_50_manifest.json"
+        if manifest_path.exists():
+            self._manifest_mtime = manifest_path.stat().st_mtime
+
+    def check_for_updates(self):
+        """Check if manifest has been modified and hot-reload if needed."""
+        manifest_path = self.experts_dir / "top_50_manifest.json"
+        if not manifest_path.exists():
+            return
+        current_mtime = manifest_path.stat().st_mtime
+        if current_mtime > self._manifest_mtime:
+            try:
+                self.loaded_experts.clear()
+                self._load_manifest()
+                self._manifest_mtime = current_mtime
+                logging.info("HOT-RELOAD: LSTM experts cache cleared, manifest reloaded")
+            except Exception as e:
+                logging.warning(f"HOT-RELOAD: Failed to reload manifest: {e}")
 
 
 # ============================================================
@@ -294,6 +342,7 @@ class AccountTrader:
         self.regime_detector = RegimeDetector(config)
         self.expert_loader = ExpertLoader()
         self.feature_engineer = FeatureEngineer()
+        self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
         self.starting_balance = 0.0
 
     def connect(self) -> bool:
@@ -539,6 +588,8 @@ class AccountTrader:
             return False
 
     def run_cycle(self) -> Dict[str, dict]:
+        self.expert_loader.check_for_updates()
+
         results = {}
         if not self.check_risk_limits():
             return results
@@ -546,6 +597,19 @@ class AccountTrader:
         for symbol in self.account_config['symbols']:
             regime, fidelity, action, confidence = self.analyze_symbol(symbol)
             trade_executed = False
+            teqa_reason = ""
+
+            # Apply TEQA quantum signal
+            if self.teqa_bridge is not None and action is not None:
+                lstm_action_str = action.name  # 'BUY', 'SELL', or 'HOLD'
+                final_action_str, final_conf, lot_mult, teqa_reason = \
+                    self.teqa_bridge.apply_to_lstm(lstm_action_str, confidence)
+                # Map back to Action enum
+                action_map = {'BUY': Action.BUY, 'SELL': Action.SELL, 'HOLD': Action.HOLD}
+                action = action_map.get(final_action_str, Action.HOLD)
+                confidence = final_conf
+                logging.info(f"[{self.account_key}][{symbol}] {teqa_reason}")
+
             if regime == Regime.CLEAN and action in [Action.BUY, Action.SELL]:
                 trade_executed = self.execute_trade(symbol, action, confidence)
 
@@ -555,6 +619,7 @@ class AccountTrader:
                 'action': action.name if action else 'NONE',
                 'confidence': confidence,
                 'trade_executed': trade_executed,
+                'teqa': teqa_reason if teqa_reason else 'disabled',
             }
 
             # Send to QuantumChildren network
@@ -621,6 +686,12 @@ class AtlasBrain:
                         status = "TRADED" if data['trade_executed'] else ""
                         print(f"  [{icon}] {symbol}: {data['regime']} | "
                               f"{data['action']} ({data['confidence']:.2f}) {status}")
+                        if data.get('teqa') and data['teqa'] != 'disabled':
+                            print(f"      {data['teqa']}")
+
+                    # Show TEQA status line
+                    if TEQA_ENABLED and trader.teqa_bridge:
+                        print(f"  {trader.teqa_bridge.get_status_line()}")
 
                 idx = (idx + 1) % len(account_keys)
                 time.sleep(self.config.CHECK_INTERVAL_SECONDS)

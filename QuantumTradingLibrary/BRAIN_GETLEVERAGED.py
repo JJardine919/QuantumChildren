@@ -57,6 +57,13 @@ from credential_manager import get_credentials, CredentialError
 # Pre-launch validation
 from prelaunch_validator import validate_prelaunch
 
+# TEQA quantum signal bridge
+try:
+    from teqa_bridge import TEQABridge
+    TEQA_ENABLED = True
+except ImportError:
+    TEQA_ENABLED = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -184,7 +191,9 @@ class ExpertLoader:
             self.experts_dir = Path(experts_dir)
         self.manifest = None
         self.loaded_experts: Dict[str, nn.Module] = {}
+        self._manifest_mtime = 0.0
         self._load_manifest()
+        self._record_initial_mtime()
 
     def _load_manifest(self):
         manifest_path = self.experts_dir / "top_50_manifest.json"
@@ -228,6 +237,27 @@ class ExpertLoader:
         except Exception as e:
             logging.error(f"Failed to load expert: {e}")
             return None
+
+    def _record_initial_mtime(self):
+        """Record manifest modification time after initial load."""
+        manifest_path = self.experts_dir / "top_50_manifest.json"
+        if manifest_path.exists():
+            self._manifest_mtime = manifest_path.stat().st_mtime
+
+    def check_for_updates(self):
+        """Check if manifest has been modified and hot-reload if needed."""
+        manifest_path = self.experts_dir / "top_50_manifest.json"
+        if not manifest_path.exists():
+            return
+        current_mtime = manifest_path.stat().st_mtime
+        if current_mtime > self._manifest_mtime:
+            try:
+                self.loaded_experts.clear()
+                self._load_manifest()
+                self._manifest_mtime = current_mtime
+                logging.info("HOT-RELOAD: LSTM experts cache cleared, manifest reloaded")
+            except Exception as e:
+                logging.warning(f"HOT-RELOAD: Failed to reload manifest: {e}")
 
 
 # ============================================================
@@ -304,6 +334,7 @@ class AccountTrader:
         self.regime_detector = RegimeDetector(config)
         self.expert_loader = ExpertLoader()
         self.feature_engineer = FeatureEngineer()
+        self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
         self.starting_balance = 0.0
 
     def connect(self) -> bool:
@@ -514,6 +545,8 @@ class AccountTrader:
             return False
 
     def run_cycle(self) -> Dict[str, dict]:
+        self.expert_loader.check_for_updates()
+
         results = {}
         if not self.check_risk_limits():
             return results
@@ -521,6 +554,17 @@ class AccountTrader:
         for symbol in self.account_config['symbols']:
             regime, fidelity, action, confidence = self.analyze_symbol(symbol)
             trade_executed = False
+            teqa_reason = ""
+
+            # Apply TEQA quantum signal
+            if self.teqa_bridge is not None and action is not None:
+                final_act, final_conf, lot_mult, teqa_reason = \
+                    self.teqa_bridge.apply_to_lstm(action.name, confidence)
+                action_map = {'BUY': Action.BUY, 'SELL': Action.SELL, 'HOLD': Action.HOLD}
+                action = action_map.get(final_act, Action.HOLD)
+                confidence = final_conf
+                logging.info(f"[{self.account_key}][{symbol}] {teqa_reason}")
+
             if regime == Regime.CLEAN and action in [Action.BUY, Action.SELL]:
                 trade_executed = self.execute_trade(symbol, action, confidence)
 
