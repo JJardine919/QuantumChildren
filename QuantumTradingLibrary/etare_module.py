@@ -13,6 +13,24 @@ import torch
 import torch.nn as nn
 import torch.multiprocessing as mp
 
+# --- GPU Device Detection ---
+DEVICE = None
+GPU_NAME = "CPU"
+try:
+    import torch_directml
+    DEVICE = torch_directml.device()
+    GPU_NAME = torch_directml.device_name(0)
+    logging.info(f"DirectML GPU detected: {GPU_NAME}")
+except ImportError:
+    if torch.cuda.is_available():
+        DEVICE = torch.device('cuda:0')
+        GPU_NAME = torch.cuda.get_device_name(0)
+        logging.info(f"CUDA GPU detected: {GPU_NAME}")
+    else:
+        DEVICE = torch.device('cpu')
+        GPU_NAME = "CPU"
+        logging.warning("No GPU detected, using CPU")
+
 # --- Enums and Data Classes ---
 
 class Action(Enum):
@@ -34,8 +52,11 @@ class LSTMModel(nn.Module):
     def forward(self, x):
         if len(x.shape) == 2:
             x = x.unsqueeze(1)
-        out, _ = self.lstm(x)
+        # CPU fallback for LSTM (DirectML kernel not supported)
+        x_cpu = x.cpu()
+        out, _ = self.lstm(x_cpu)
         out = self.dropout(out[:, -1, :])
+        out = out.to(x.device)
         out = self.fc(out)
         return out
 
@@ -79,15 +100,18 @@ class TradingIndividual:
 
 # --- Multi-GPU Training Worker ---
 
-def train_worker(device_id, individuals_chunk, training_features, training_labels, results_queue):
-    device = f'cuda:{device_id}'
-    logging.info(f"Worker process started for {device} with {len(individuals_chunk)} individuals.")
+def train_on_device(individuals, training_features, training_labels, device):
+    """Train individuals on a specific device (CUDA, DirectML, or CPU)"""
+    logging.info(f"Training {len(individuals)} individuals on {device} ({GPU_NAME})")
     X_train_tensor = torch.from_numpy(training_features).float().to(device)
     y_train_tensor = torch.from_numpy(training_labels).long().to(device)
-    trained_chunk = []
-    for individual in individuals_chunk:
+
+    for idx, individual in enumerate(individuals):
         try:
-            individual.model.to(device)
+            # Keep LSTM on CPU, FC layers on device
+            individual.model.lstm.to('cpu')
+            individual.model.dropout.to('cpu')
+            individual.model.fc.to(device)
             individual.model.optimizer = torch.optim.Adam(individual.model.parameters(), lr=0.001)
             train_dataset = torch.utils.data.TensorDataset(X_train_tensor, y_train_tensor)
             train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=64, shuffle=True)
@@ -100,13 +124,21 @@ def train_worker(device_id, individuals_chunk, training_features, training_label
                     loss.backward()
                     individual.model.optimizer.step()
             individual.model.to('cpu')
-            trained_chunk.append(individual)
+            if (idx + 1) % 10 == 0:
+                logging.info(f"  Trained {idx + 1}/{len(individuals)} individuals")
         except Exception as e:
-            logging.error(f"Error training individual on {device}: {e}", exc_info=True)
+            logging.error(f"Error training individual {idx} on {device}: {e}", exc_info=True)
             individual.model.to('cpu')
-            trained_chunk.append(individual)
-    results_queue.put(trained_chunk)
-    logging.info(f"Worker for {device} finished.")
+
+    logging.info(f"Training complete for {len(individuals)} individuals.")
+    return individuals
+
+
+def train_worker(device_id, individuals_chunk, training_features, training_labels, results_queue):
+    """Legacy multi-GPU worker for CUDA"""
+    device = f'cuda:{device_id}'
+    trained = train_on_device(individuals_chunk, training_features, training_labels, device)
+    results_queue.put(trained)
 
 # --- Hybrid Trader ---
 
@@ -127,10 +159,10 @@ class HybridTrader:
         if not self.population:
             self.input_size = training_features.shape[1]
             self._initialize_population()
-        
+
         if torch.cuda.is_available():
             num_gpus = torch.cuda.device_count()
-            logging.info(f"Found {num_gpus} GPUs. Distributing training across them.")
+            logging.info(f"Found {num_gpus} CUDA GPUs. Distributing training across them.")
             try:
                 mp.set_start_method('spawn', force=True)
             except RuntimeError:
@@ -151,6 +183,13 @@ class HybridTrader:
                 process.join()
             self.population = new_population
             logging.info("Multi-GPU training complete.")
+        elif DEVICE is not None and str(DEVICE) != 'cpu':
+            # DirectML or other non-CUDA GPU
+            logging.info(f"Using {GPU_NAME} via DirectML for training.")
+            self.population = train_on_device(
+                self.population, training_features, training_labels, DEVICE
+            )
+            logging.info("DirectML GPU training complete.")
         else:
             raise RuntimeError("No GPUs found. Training on CPU is disabled as per the new rule.")
 

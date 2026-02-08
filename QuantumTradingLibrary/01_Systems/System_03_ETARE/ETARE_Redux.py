@@ -14,8 +14,13 @@ from copy import deepcopy
 import sqlite3
 import json
 import os
+import sys
 import glob
 from datetime import datetime, timedelta
+
+# Add ETARE_QuantumFusion modules to path for FastQuantumExtractor
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'ETARE_QuantumFusion'))
+from modules.quantum_lstm_adapter import FastQuantumExtractor
 
 # Try to enable GPU via DirectML
 try:
@@ -173,14 +178,27 @@ class TradingIndividual:
 
 class ETARE_System:
     def __init__(self):
-        self.conn = sqlite3.connect("etare_redux_v2.db")
+        self.conn = sqlite3.connect("etare_redux_v3.db")
         self.create_tables()
         self.population: List[TradingIndividual] = []
         self.input_size = 0 # Will be set dynamically
-        
-        # Initialize MT5
-        if not mt5.initialize():
-            logging.error("MT5 Initialization failed. Ensure MT5 is running.")
+        self.quantum_extractor = FastQuantumExtractor()
+
+        # Initialize MT5 with terminal path fallback
+        terminal_paths = [
+            r"C:\Program Files\FTMO Global Markets MT5 Terminal\terminal64.exe",
+            r"C:\Program Files\Atlas Funded MT5 Terminal\terminal64.exe",
+        ]
+        initialized = False
+        for path in terminal_paths:
+            if os.path.exists(path):
+                if mt5.initialize(path=path):
+                    initialized = True
+                    logging.info(f"MT5 connected via {os.path.basename(os.path.dirname(path))}")
+                    break
+        if not initialized:
+            if not mt5.initialize():
+                logging.error("MT5 Initialization failed. Ensure MT5 is running.")
 
         # Quantum Injection: Load the cleanest available state
         self.quantum_state = self.load_quantum_state()
@@ -338,54 +356,78 @@ class ETARE_System:
         # Ensure numerical types
         cols = ['open', 'high', 'low', 'close', 'tick_volume']
         for c in cols: df[c] = df[c].astype(float)
-        
+
         # 1. RSI
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss
         df['rsi'] = 100 - (100 / (1 + rs))
-        
+
         # 2. MACD
         exp1 = df['close'].ewm(span=12, adjust=False).mean()
         exp2 = df['close'].ewm(span=26, adjust=False).mean()
         df['macd'] = exp1 - exp2
         df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
-        
+
         # 3. Bollinger Bands
         df['bb_middle'] = df['close'].rolling(window=20).mean()
         df['bb_std'] = df['close'].rolling(window=20).std()
         df['bb_upper'] = df['bb_middle'] + 2 * df['bb_std']
         df['bb_lower'] = df['bb_middle'] - 2 * df['bb_std']
-        
+
         # 4. Momentum & ROC
         df['momentum'] = df['close'] / df['close'].shift(10)
         df['roc'] = df['close'].pct_change(10) * 100
-        
+
         # 5. ATR
-        df['tr'] = np.maximum(df['high'] - df['low'], 
-                              np.maximum(abs(df['high'] - df['close'].shift(1)), 
+        df['tr'] = np.maximum(df['high'] - df['low'],
+                              np.maximum(abs(df['high'] - df['close'].shift(1)),
                                          abs(df['low'] - df['close'].shift(1))))
         df['atr'] = df['tr'].rolling(14).mean()
-        
-        # 6. Normalization
-        feature_cols = ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'momentum', 'roc', 'atr']
-        df = df.dropna() # Drop NaN from indicators
-        
+
+        # 6. Technical feature columns (original 8)
+        tech_cols = ['rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'momentum', 'roc', 'atr']
+        df = df.dropna()
+
         if df.empty: return None
 
-        # Z-score normalization
+        # 7. Quantum Features from close prices (7 features per bar)
+        close_vals = df['close'].values
+        q_cols = ['q_entropy', 'q_dominant', 'q_superposition', 'q_coherence', 'q_entanglement', 'q_phase_var', 'q_sig_states']
+        window_size = 30  # Match SEQ_LENGTH for quantum window
+
+        # Extract quantum features for each bar using a rolling window
+        q_data = np.zeros((len(close_vals), 7))
+        for i in range(len(close_vals)):
+            start = max(0, i - window_size)
+            window = close_vals[start:i+1]
+            if len(window) >= 5:  # Need minimum data for meaningful quantum features
+                metrics = self.quantum_extractor.extract(window)
+                q_data[i] = [
+                    metrics['entropy'], metrics['dominant_state'], metrics['superposition'],
+                    metrics['coherence'], metrics['entanglement'], 0.0, metrics['significant_states']
+                ]
+            # else: stays as zeros (first few bars)
+
+        for j, col in enumerate(q_cols):
+            df[col] = q_data[:, j]
+
+        # All 15 feature columns
+        feature_cols = tech_cols + q_cols
+
+        # Z-score normalization (all 15)
         for col in feature_cols:
              df[col] = (df[col] - df[col].mean()) / (df[col].std() + 1e-8)
-             
+
         # Add targets for training (Buy if price goes up, Sell if down)
         future_close = df['close'].shift(-PREDICTION_HORIZON)
         df['target'] = 0 # Hold
         df.loc[future_close > df['close'], 'target'] = 1 # Buy
         df.loc[future_close < df['close'], 'target'] = 2 # Sell
-        
+
         df = df.dropna() # Drop last rows with no target
-        
+
         # Return features and targets
         return df[feature_cols + ['target', 'close']]
 
