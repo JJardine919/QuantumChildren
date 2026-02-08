@@ -20,7 +20,18 @@ from pathlib import Path
 # ============================================================
 
 # QuantumChildren Collection Server
-COLLECTION_SERVER = "http://203.161.61.61:8888/collect"
+# Load server URL from config if available, otherwise use default
+_DEFAULT_SERVER = "http://203.161.61.61:8888"
+try:
+    import json as _json
+    _config_path = Path(__file__).parent / "config.json"
+    if _config_path.exists():
+        with open(_config_path) as _f:
+            _cfg = _json.load(_f)
+            _DEFAULT_SERVER = _cfg.get("collection_server", _DEFAULT_SERVER)
+except Exception:
+    pass
+COLLECTION_SERVER = _DEFAULT_SERVER
 
 # Local backup folder
 LOCAL_BACKUP = Path("quantum_data/")
@@ -165,7 +176,7 @@ def _save_local(data: dict, category: str):
 def _send_to_server(data: dict, endpoint: str) -> bool:
     """Send data to collection server"""
     try:
-        url = COLLECTION_SERVER.rstrip('/collect') + endpoint
+        url = COLLECTION_SERVER.rstrip('/') + endpoint
         response = requests.post(
             url,
             json=data,

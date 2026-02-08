@@ -7,5 +7,7 @@
   "max_positions": 3,
   "check_interval": 60,
   "enable_trading": false,
-  "magic_number": 777777
+  "magic_number": 777777,
+  "collection_server": "http://203.161.61.61:8888",
+  "collection_enabled": true
 }

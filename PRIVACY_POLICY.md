@@ -1,12 +1,14 @@
 # PRIVACY POLICY
 
 **Quantum Children Trading System**
+**https://quantum-children.com**
 
 Effective Date: February 4, 2026
+Last Updated: February 8, 2026
 
 ## 1. Introduction
 
-This Privacy Policy explains how the Quantum Children trading system collects, uses, and protects your information.
+This Privacy Policy explains how the Quantum Children trading system ("Software", "Service") collects, uses, and protects your information. This policy applies to the Software, the website at quantum-children.com, and the signal collection infrastructure.
 
 ## 2. Information We Collect
 
@@ -18,6 +20,7 @@ When data collection is enabled, the Software may send:
 - Compression/entropy analysis results
 - Symbol and timeframe information
 - Timestamp data
+- Trade outcomes (win/loss/breakeven, profit/loss amount)
 
 ### 2.2 What We DO NOT Collect
 
@@ -25,32 +28,47 @@ We never collect:
 - Your name or personal identification
 - Trading account credentials (passwords)
 - Account balances or equity
-- Actual trade execution data
-- IP addresses or location data
+- IP addresses for tracking purposes
+- Email addresses (unless you create a website account)
 - Personal financial information
+- Browser fingerprints or tracking cookies
 
 ### 2.3 Anonymous Identifiers
 
-Signal data may include anonymous identifiers to:
+Signal data includes a randomly generated node ID (e.g., "QC_0EAE9938E5B0") to:
 - Track signal performance over time
 - Identify signal patterns
 - Improve algorithm accuracy
 
-These identifiers cannot be linked to your identity.
+These identifiers are generated locally on your machine and cannot be linked to your identity.
+
+### 2.4 Website Account Data
+
+If you create an account on quantum-children.com, we collect:
+- Email address (for authentication)
+- Password (hashed, never stored in plaintext)
 
 ## 3. How We Use Data
 
 Collected data is used to:
-- Improve signal accuracy
+- Improve signal accuracy across the network
 - Develop better trading algorithms
 - Research market patterns
-- Enhance system performance
+- Display aggregate network statistics on the website
+- Enhance system performance for all users
 
-## 4. Data Storage
+We do NOT use data for:
+- Targeted advertising
+- Selling to third parties
+- Profiling individual users
 
-- Signal data is stored on secure servers
-- Data is retained for algorithm training purposes
-- Aggregated statistics may be kept indefinitely
+## 4. Data Storage and Retention
+
+- Signal data is stored on our collection server
+- **Retention period**: Raw signal data is retained for 24 months for model training purposes
+- Aggregated statistics (non-identifiable) may be kept indefinitely
+- Website account data is retained while your account is active
+- You may request deletion at any time (see Section 10)
 
 ## 5. Data Sharing
 
@@ -58,81 +76,119 @@ We DO NOT:
 - Sell your data to third parties
 - Share individual trading data
 - Provide data to marketing companies
+- Share data with advertisers
 
 We MAY share:
-- Aggregated, anonymized statistics
-- Research findings (without personal data)
+- Aggregated, anonymized statistics (e.g., "3,255 total signals collected")
+- Research findings (without any identifiable data)
 
 ## 6. Your Control
 
 ### 6.1 Disable Data Collection
 
-To disable signal collection:
-
-In `MASTER_CONFIG.json`:
+To disable signal collection, edit `config.json`:
 ```json
-"COLLECTION_SERVER": {
-    "enabled": false
+{
+    "collection_enabled": false
 }
 ```
 
+The Software will continue to function for trading without sending data to the network.
+
 ### 6.2 Data Deletion
 
-To request deletion of your anonymous signal data, contact the project maintainers with your installation date range.
+To request deletion of your data, contact us (see Section 13). Include your node ID (found in `quantum_data/.node_id`) and the approximate date range of data you want deleted.
 
-## 7. Collection Server
+## 7. Collection Infrastructure
 
-Signal data is sent to: `http://203.161.61.61:8888`
-
-This server:
-- Receives trading signals only
-- Does not log IP addresses
-- Uses minimal data storage
+Signal data is sent to our collection server via HTTPS. The server:
+- Receives trading signals, outcomes, and entropy snapshots
+- Does not log IP addresses for tracking
+- Uses rate limiting to prevent abuse
+- Stores data in an encrypted database
 
 ## 8. Third-Party Services
 
 The Software connects to:
 - **MetaTrader 5**: Subject to MetaQuotes privacy policy
 - **Your Broker**: Subject to your broker's privacy policy
+- **Base44** (website hosting): Subject to Base44's privacy policy
+- **Usercentrics** (cookie consent on website): Subject to Usercentrics privacy policy
 - **Ollama (Optional)**: Local LLM, no external data sent
 
 ## 9. Security
 
 We implement:
-- Minimal data collection
-- Anonymous data transmission
-- Secure server infrastructure
+- Minimal data collection (only what's needed)
+- Anonymous data transmission (no PII attached)
+- Rate limiting on all endpoints
+- Input validation on submitted data
+- Encrypted storage
 
 However, no system is 100% secure. Use at your own risk.
 
-## 10. Children's Privacy
+## 10. Your Rights
 
-This Software is not intended for users under 18 years of age. We do not knowingly collect data from minors.
+### 10.1 For All Users
 
-## 11. Changes to This Policy
+Regardless of your location, you have the right to:
+- **Access**: Request a copy of the data we hold about your node ID
+- **Deletion**: Request deletion of your signal data
+- **Opt-out**: Disable data collection at any time via config
+- **Information**: Know what data we collect and how we use it
 
-We may update this policy periodically. Continued use of the Software constitutes acceptance of changes.
+### 10.2 European Economic Area (GDPR)
 
-## 12. Your Rights
+If you are in the EEA, you have additional rights under the General Data Protection Regulation:
+- **Legal basis**: We process data based on legitimate interest (improving the trading network for all users) and your consent (enabled via config)
+- **Right to rectification**: Request correction of inaccurate data
+- **Right to restrict processing**: Request that we limit how we use your data
+- **Right to data portability**: Receive your data in a machine-readable format (JSON)
+- **Right to object**: Object to processing based on legitimate interest
+- **Right to withdraw consent**: Disable collection at any time; withdrawal does not affect lawfulness of prior processing
+- **Response time**: We will respond to rights requests within 30 days
 
-Depending on your jurisdiction, you may have rights to:
-- Access your data
-- Request deletion
-- Opt out of collection
-- Data portability
+### 10.3 California (CCPA)
+
+If you are a California resident, you have rights under the California Consumer Privacy Act:
+- **Right to know**: What personal information we collect, use, and disclose
+- **Right to delete**: Request deletion of your personal information
+- **Right to opt-out**: We do NOT sell personal information. No opt-out is necessary.
+- **Non-discrimination**: We will not discriminate against you for exercising your rights
+
+## 11. Cookies
+
+The quantum-children.com website may use:
+- **Essential cookies**: Required for authentication and session management
+- **Analytics cookies**: To understand site usage (only with your consent via the cookie banner)
+
+We do NOT use advertising or tracking cookies. The Usercentrics consent banner on the website allows you to manage your cookie preferences.
+
+## 12. Children's Privacy
+
+This Software is not intended for users under 18 years of age. We do not knowingly collect data from minors. If you believe a minor has provided data through the Software, contact us for immediate deletion.
 
 ## 13. Contact
 
-For privacy inquiries:
-- Open an issue on the project repository
-- Email the project maintainers
+For privacy inquiries, data access requests, or deletion requests:
+- **Email**: privacy@quantum-children.com
+- **GitHub**: Open an issue at https://github.com/JJardine919/QuantumChildren-Free/issues
+- **Website**: https://quantum-children.com/contact
 
-## 14. Consent
+We will respond to all privacy requests within 30 days.
 
-BY USING QUANTUM CHILDREN WITH DATA COLLECTION ENABLED, YOU CONSENT TO THE COLLECTION AND USE OF DATA AS DESCRIBED IN THIS POLICY.
+## 14. International Data Transfers
+
+Our collection server is hosted in Australia. If you are located outside Australia, your signal data will be transferred to and processed in Australia. By using the Software with data collection enabled, you consent to this transfer. We ensure appropriate safeguards are in place for international data transfers.
+
+## 15. Changes to This Policy
+
+We may update this policy periodically. Changes will be posted on the website and noted with a new "Last Updated" date. Continued use of the Software after changes constitutes acceptance of the updated policy. Material changes will be communicated via the website and GitHub repository.
+
+## 16. Consent
+
+BY USING QUANTUM CHILDREN WITH DATA COLLECTION ENABLED, YOU CONSENT TO THE COLLECTION AND USE OF DATA AS DESCRIBED IN THIS POLICY. YOU MAY WITHDRAW CONSENT AT ANY TIME BY DISABLING COLLECTION IN YOUR CONFIG FILE.
 
 ---
 
-**Summary**: We collect anonymous trading signals to improve the system. We don't collect personal information or account credentials. You can disable collection in the config file.
-
-Last Updated: February 4, 2026
+**Summary**: We collect anonymous trading signals to improve the system for everyone. We don't collect personal information or account credentials. You can disable collection in the config file. You have the right to access, delete, or port your data at any time.

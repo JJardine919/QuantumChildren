@@ -23,8 +23,15 @@ from pathlib import Path
 from functools import wraps
 from collections import defaultdict
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 
 app = Flask(__name__)
+# Allow cross-origin requests from the website only
+CORS(app, resources={r"/*": {"origins": [
+    "https://quantum-children.com",
+    "http://quantum-children.com",
+    "http://localhost:3000"  # Local development
+]}})
 
 # ============================================================
 # SECURITY & RATE LIMITING
@@ -66,7 +73,7 @@ def require_admin_key(f):
     def wrapped(*args, **kwargs):
         key = request.headers.get('X-API-Key', '')
         if not ADMIN_API_KEY:
-            return f(*args, **kwargs)  # No key configured = open (dev mode)
+            return jsonify({'error': 'Admin key not configured. Set QC_ADMIN_KEY env var.'}), 503
         if not key or key != ADMIN_API_KEY:
             return jsonify({'error': 'Unauthorized'}), 401
         return f(*args, **kwargs)
@@ -195,11 +202,29 @@ def ping():
 def collect_signal():
     """Receive trading signal"""
     try:
+        # Enforce request body size limit (64KB)
+        if request.content_length and request.content_length > 65536:
+            return jsonify({'error': 'Request too large'}), 413
+
         data = request.get_json()
         if not data:
             return jsonify({'error': 'No data'}), 400
 
         node_id = data.get('node_id', 'UNKNOWN')
+
+        # Input validation
+        symbol = data.get('symbol')
+        direction = data.get('direction')
+        if direction and direction not in ('BUY', 'SELL', 'HOLD'):
+            return jsonify({'error': 'Invalid direction. Must be BUY, SELL, or HOLD'}), 400
+        confidence = data.get('confidence')
+        if confidence is not None:
+            try:
+                confidence = float(confidence)
+                if not (0.0 <= confidence <= 1.0):
+                    return jsonify({'error': 'Confidence must be between 0 and 1'}), 400
+            except (TypeError, ValueError):
+                return jsonify({'error': 'Confidence must be a number'}), 400
 
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
@@ -212,9 +237,9 @@ def collect_signal():
         ''', (
             node_id,
             data.get('sig_hash'),
-            data.get('symbol'),
-            data.get('direction'),
-            data.get('confidence'),
+            symbol,
+            direction,
+            confidence,
             data.get('quantum_entropy'),
             data.get('dominant_state'),
             data.get('price'),
@@ -827,7 +852,7 @@ def home():
 
         <div style="margin-top: 30px;">
             <a href="/stats" class="btn">📊 RAW STATS API</a>
-            <a href="https://github.com/quantumchildren" class="btn">🚀 GET THE SYSTEM</a>
+            <a href="https://github.com/JJardine919/QuantumChildren-Free" class="btn">🚀 GET THE SYSTEM</a>
         </div>
 
         <p style="margin-top: 40px; color: #444; font-size: 0.8em;">
