@@ -1,12 +1,17 @@
 """
-TEQA LIVE RUNNER v3.0 - Feeds Live MT5 Data to Quantum Circuit
-===============================================================
+TEQA LIVE RUNNER v3.1 - Multi-Symbol Feeds Live MT5 Data to Quantum Circuit
+============================================================================
 Connects to MT5 (read-only), fetches OHLCV data, runs TEQA v3.0
 Neural-TE quantum circuit, and writes te_quantum_signal.json for BRAIN scripts.
+
+Supports multi-symbol mode: cycles through all symbols each interval,
+writing per-symbol signal files (te_quantum_signal_BTCUSD.json, etc.)
+plus a legacy te_quantum_signal.json for backward compatibility.
 
 Pipeline: MT5 OHLCV → TEQA v3.0 (Neural Mosaic + Split Quantum) → JSON
 
 Run: python teqa_live.py [--symbol BTCUSD] [--interval 60] [--account ATLAS]
+     python teqa_live.py --symbols BTCUSD,ETHUSD,XAUUSD --account ATLAS
      python teqa_live.py --symbol BTCUSD --donor-symbol ETHUSD --neurons 7
 
 Author: DooDoo + Claude
@@ -17,6 +22,7 @@ import sys
 import io
 import time
 import json
+import shutil
 import logging
 import argparse
 from pathlib import Path
@@ -272,21 +278,61 @@ def run_once(engine: TEQAv3Engine, fetcher: MT5DataFetcher,
         return False
 
 
+def run_multi(engine: TEQAv3Engine, fetcher: MT5DataFetcher,
+              symbols: list, script_dir: Path,
+              donor_symbol: str = None) -> int:
+    """
+    Run TEQA v3.0 for multiple symbols in one cycle.
+    Writes per-symbol files (te_quantum_signal_BTCUSD.json) and
+    legacy te_quantum_signal.json (last symbol processed, backward compat).
+
+    Returns number of successful runs.
+    """
+    successes = 0
+    for sym in symbols:
+        per_symbol_path = str(script_dir / f'te_quantum_signal_{sym}.json')
+        ok = run_once(engine, fetcher, sym, per_symbol_path,
+                      donor_symbol=donor_symbol)
+        if ok:
+            successes += 1
+            # Also write legacy generic file (last successful symbol wins)
+            legacy_path = str(script_dir / 'te_quantum_signal.json')
+            try:
+                shutil.copy2(per_symbol_path, legacy_path)
+            except Exception as e:
+                logger.warning(f"Failed to copy legacy signal file: {e}")
+    return successes
+
+
 def main():
     parser = argparse.ArgumentParser(description='TEQA v3.0 Live Runner - Neural-TE Integration')
-    parser.add_argument('--symbol', default='BTCUSD', help='Symbol to analyze (default: BTCUSD)')
+    parser.add_argument('--symbol', default=None,
+                        help='Single symbol to analyze (default: BTCUSD). Alias for --symbols with one symbol.')
+    parser.add_argument('--symbols', default=None,
+                        help='Comma-separated symbols to analyze (e.g. BTCUSD,ETHUSD,XAUUSD)')
     parser.add_argument('--donor-symbol', default=None, help='Donor symbol for speciation (e.g. ETHUSD)')
     parser.add_argument('--interval', type=int, default=60, help='Seconds between runs (default: 60)')
     parser.add_argument('--account', default=None, help='Account key (ATLAS, BG_INSTANT, etc)')
-    parser.add_argument('--output', default=None, help='Output JSON path')
+    parser.add_argument('--output', default=None, help='Output JSON path (single-symbol mode only)')
     parser.add_argument('--neurons', type=int, default=7, help='Neural mosaic population size (default: 7)')
     parser.add_argument('--shots', type=int, default=8192, help='Quantum shots (default: 8192)')
     parser.add_argument('--once', action='store_true', help='Run once and exit')
     args = parser.parse_args()
 
-    # Output path
+    # Resolve symbol list: --symbols takes priority, --symbol is single-symbol alias
+    if args.symbols:
+        symbol_list = [s.strip() for s in args.symbols.split(',') if s.strip()]
+    elif args.symbol:
+        symbol_list = [args.symbol]
+    else:
+        symbol_list = ['BTCUSD']  # default
+
+    multi_mode = len(symbol_list) > 1
+
+    # Output path (only used in single-symbol mode)
     script_dir = Path(__file__).parent.absolute()
-    output_path = args.output or str(script_dir / 'te_quantum_signal.json')
+    if not multi_mode:
+        output_path = args.output or str(script_dir / 'te_quantum_signal.json')
 
     # Initialize TEQA v3.0 engine
     logger.info(f"Initializing TEQA v3.0 Neural-TE engine ({args.neurons} neurons, {args.shots} shots)...")
@@ -300,14 +346,21 @@ def main():
         sys.exit(1)
 
     print("=" * 60)
-    print(f"  TEQA v3.0 LIVE RUNNER - Neural-TE Integration")
-    print(f"  Symbol:   {args.symbol}")
+    print(f"  TEQA v3.1 LIVE RUNNER - Neural-TE Integration")
+    if multi_mode:
+        print(f"  Symbols:  {', '.join(symbol_list)}")
+    else:
+        print(f"  Symbol:   {symbol_list[0]}")
     print(f"  Donor:    {args.donor_symbol or 'none'}")
     print(f"  Neurons:  {args.neurons}")
     print(f"  Shots:    {args.shots}")
     print(f"  Interval: {args.interval}s")
-    print(f"  Output:   {output_path}")
+    if multi_mode:
+        print(f"  Output:   per-symbol files + legacy fallback")
+    else:
+        print(f"  Output:   {output_path}")
     print(f"  Account:  {args.account or 'auto'}")
+    print(f"  Mode:     {'MULTI-SYMBOL' if multi_mode else 'SINGLE-SYMBOL'}")
     print("=" * 60)
 
     run_count = 0
@@ -317,8 +370,14 @@ def main():
             run_count += 1
             logger.info(f"--- Run #{run_count} ({datetime.now().strftime('%H:%M:%S')}) ---")
 
-            success = run_once(engine, fetcher, args.symbol, output_path,
-                               donor_symbol=args.donor_symbol)
+            if multi_mode:
+                successes = run_multi(engine, fetcher, symbol_list, script_dir,
+                                      donor_symbol=args.donor_symbol)
+                success = successes > 0
+                logger.info(f"Cycle complete: {successes}/{len(symbol_list)} symbols processed")
+            else:
+                success = run_once(engine, fetcher, symbol_list[0], output_path,
+                                   donor_symbol=args.donor_symbol)
 
             if args.once:
                 sys.exit(0 if success else 1)
