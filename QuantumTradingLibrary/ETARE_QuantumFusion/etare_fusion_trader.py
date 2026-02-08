@@ -10,17 +10,28 @@ import pandas as pd
 # Add the project modules to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(script_dir, 'modules'))
+sys.path.insert(0, os.path.dirname(script_dir))  # For credential_manager
 
 from signal_fusion import SignalFusionEngine
 
 # ==============================================================================
 # CONFIGURATION (Mirrors the Champion Expert)
+# Credentials loaded from environment or .env file
 # ==============================================================================
 
+# Load FTMO credentials from environment
+FTMO_ACCOUNT = int(os.environ.get('FTMO_ACCOUNT', '1512287880'))
+FTMO_PASSWORD = os.environ.get('FTMO_PASSWORD', '')
+FTMO_SERVER = os.environ.get('FTMO_SERVER', 'FTMO-Demo')
+
+if not FTMO_PASSWORD:
+    print("WARNING: FTMO_PASSWORD not set in environment")
+    print("Set FTMO_PASSWORD environment variable or add to .env file")
+
 CONFIG = {
-    'account': 1512287880,
-    'password': '1a3Q@fT24@LEw',
-    'server': 'FTMO-Demo',
+    'account': FTMO_ACCOUNT,
+    'password': FTMO_PASSWORD,
+    'server': FTMO_SERVER,
     'symbol': 'BTCUSD',
     'timeframe': mt5.TIMEFRAME_M5,
     'magic_number': 73049,  # New magic for Fusion System
@@ -33,7 +44,7 @@ CONFIG = {
     'profit_target': 10.0,
     'max_grids': 2,
     'check_interval': 300,
-    
+
     # Fusion Settings
     'fusion_config': os.path.join(script_dir, 'config/config.yaml'),
     'veto_threshold': 0.25, # If Fusion disagrees by more than this, cancel trade

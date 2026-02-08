@@ -22,9 +22,16 @@ from torch.utils.data import DataLoader, Dataset
 from datetime import datetime, timedelta
 import logging
 
+# DirectML GPU support for AMD Radeon
+try:
+    import torch_directml
+    DML_AVAILABLE = True
+except ImportError:
+    DML_AVAILABLE = False
+
 # Add modules to path
 sys.path.append(os.path.join(os.getcwd(), "ETARE_QuantumFusion"))
-from modules.quantum_lstm_adapter import QuantumFeatureExtractor, QuantumLSTM
+from modules.quantum_lstm_adapter import QuantumFeatureExtractor, FastQuantumExtractor, QuantumLSTM
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -50,10 +57,22 @@ class MarketDataset(Dataset):
         return self.price[idx], self.quantum[idx], self.targets[idx]
 
 def fetch_data():
-    if not mt5.initialize():
-        logger.error("MT5 Init Failed")
-        return None
-        
+    terminal_paths = [
+        r"C:\Program Files\FTMO Global Markets MT5 Terminal\terminal64.exe",
+        r"C:\Program Files\Atlas Funded MT5 Terminal\terminal64.exe",
+    ]
+    initialized = False
+    for path in terminal_paths:
+        if os.path.exists(path):
+            if mt5.initialize(path=path):
+                initialized = True
+                logger.info(f"MT5 connected via {os.path.basename(os.path.dirname(path))}")
+                break
+    if not initialized:
+        if not mt5.initialize():
+            logger.error("MT5 Init Failed")
+            return None
+
     logger.info(f"Fetching {DAYS} days of {SYMBOL}...")
     rates = mt5.copy_rates_from_pos(SYMBOL, TIMEFRAME, 0, 288 * DAYS) # 288 bars per day (M5)
     mt5.shutdown()
@@ -72,47 +91,31 @@ def fetch_data():
     return df.dropna()
 
 def prepare_dataset(df):
-    logger.info("Generating Quantum Features (This takes time)...")
-    extractor = QuantumFeatureExtractor()
-    
-    price_seqs = []
-    quantum_feats = []
-    targets = []
-    
-    # Sliding window
-    # Input: 50 bars. Target: Next bar direction (1=Up, 0=Down)
+    logger.info("Generating Quantum Features (Fast numpy mode)...")
+    extractor = FastQuantumExtractor()
+
     window_size = 50
-    
+
     # Pre-calc tech features
     tech_data = df[['returns', 'log_returns', 'high_low', 'close_open', 'tick_volume']].values
     tech_data = (tech_data - np.mean(tech_data, axis=0)) / (np.std(tech_data, axis=0) + 1e-8)
-    
-    # Pre-calc raw prices for quantum
+
     raw_close = df['close'].values
-    
-    for i in range(window_size, len(df) - 1):
-        # 1. Tech Seq
-        seq = tech_data[i-window_size:i]
-        
-        # 2. Quantum Feat (Last window)
-        q_window = raw_close[i-window_size:i]
-        q_dict = extractor.extract(q_window)
-        q_vec = [
-            q_dict['entropy'], q_dict['dominant_state'], q_dict['superposition'],
-            q_dict['coherence'], q_dict['entanglement'], 0.0, q_dict['significant_states']
-        ]
-        
-        # 3. Target
-        target = 1.0 if raw_close[i+1] > raw_close[i] else 0.0
-        
-        price_seqs.append(seq)
-        quantum_feats.append(q_vec)
-        targets.append(target)
-        
-        if i % 1000 == 0:
-            print(f"Processed {i}/{len(df)} bars...", end='\r')
-            
-    return np.array(price_seqs), np.array(quantum_feats), np.array(targets)
+
+    # Build all windows at once
+    indices = np.arange(window_size, len(df) - 1)
+    all_windows = [raw_close[i - window_size:i] for i in indices]
+
+    # Batch quantum extraction (numpy - seconds instead of hours)
+    logger.info(f"Extracting quantum features for {len(all_windows)} windows...")
+    quantum_feats = extractor.batch_extract(all_windows)
+    logger.info(f"Quantum features done.")
+
+    # Build tech sequences and targets
+    price_seqs = np.array([tech_data[i - window_size:i] for i in indices])
+    targets = (raw_close[indices + 1] > raw_close[indices]).astype(np.float32)
+
+    return price_seqs, quantum_feats, targets
 
 def train():
     df = fetch_data()
@@ -124,8 +127,14 @@ def train():
     dataset = MarketDataset(X_price, X_quant, y)
     loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
     
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logger.info(f"Training on: {device}")
+    # DirectML doesn't support LSTM ops - use CPU for training
+    # (Quantum feature extraction was the real bottleneck, now solved with FastQuantumExtractor)
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        logger.info(f"Training on: CUDA ({torch.cuda.get_device_name(0)})")
+    else:
+        device = torch.device('cpu')
+        logger.info(f"Training on: CPU (LSTM not supported on DirectML)")
     
     model = QuantumLSTM().to(device)
     optimizer = optim.Adam(model.parameters(), lr=LR)
