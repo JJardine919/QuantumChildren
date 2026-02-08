@@ -2,6 +2,7 @@
 QUANTUM CHILDREN - DATA COLLECTION SERVER
 ==========================================
 Receives entropy data from distributed trading nodes.
+Provides bridge API for Base44 web dashboard.
 
 Deploy on VPS:
     pip install flask
@@ -14,11 +15,62 @@ Or with gunicorn:
 import json
 import os
 import sqlite3
-from datetime import datetime
+import hashlib
+import time
+import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
+from functools import wraps
+from collections import defaultdict
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+
+# ============================================================
+# SECURITY & RATE LIMITING
+# ============================================================
+
+ADMIN_API_KEY = os.environ.get('QC_ADMIN_KEY', '')
+_rate_limit_store = defaultdict(list)
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX_REQUESTS = 30  # per window for public endpoints
+RATE_LIMIT_MAX_ADMIN = 10  # per window for admin endpoints
+
+
+def _get_client_ip():
+    return request.headers.get('X-Forwarded-For', request.remote_addr)
+
+
+def rate_limit(max_requests=RATE_LIMIT_MAX_REQUESTS):
+    """Simple in-memory rate limiter"""
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            ip = _get_client_ip()
+            now = time.time()
+            _rate_limit_store[ip] = [
+                t for t in _rate_limit_store[ip]
+                if now - t < RATE_LIMIT_WINDOW
+            ]
+            if len(_rate_limit_store[ip]) >= max_requests:
+                return jsonify({'error': 'Rate limit exceeded'}), 429
+            _rate_limit_store[ip].append(now)
+            return f(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
+def require_admin_key(f):
+    """Require API key for admin/bridge endpoints"""
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        key = request.headers.get('X-API-Key', '')
+        if not ADMIN_API_KEY:
+            return f(*args, **kwargs)  # No key configured = open (dev mode)
+        if not key or key != ADMIN_API_KEY:
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return wrapped
 
 # ============================================================
 # DATABASE SETUP
@@ -131,13 +183,15 @@ init_db()
 # API ENDPOINTS
 # ============================================================
 
-@app.route('/ping', methods=['POST'])
+@app.route('/ping', methods=['GET', 'POST'])
+@rate_limit()
 def ping():
     """Health check endpoint"""
     return jsonify({'status': 'ok', 'server': 'QuantumChildren', 'time': datetime.utcnow().isoformat()})
 
 @app.route('/collect', methods=['POST'])
 @app.route('/signal', methods=['POST'])
+@rate_limit()
 def collect_signal():
     """Receive trading signal"""
     try:
@@ -179,6 +233,7 @@ def collect_signal():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/outcome', methods=['POST'])
+@rate_limit()
 def collect_outcome():
     """Receive trade outcome"""
     try:
@@ -217,6 +272,7 @@ def collect_outcome():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/entropy', methods=['POST'])
+@rate_limit()
 def collect_entropy():
     """Receive entropy snapshot"""
     try:
@@ -258,6 +314,7 @@ def collect_entropy():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/stats', methods=['GET'])
+@rate_limit()
 def get_stats():
     """Get collection statistics"""
     try:
@@ -293,6 +350,314 @@ def get_stats():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ============================================================
+# BRIDGE API (for Base44 web dashboard)
+# ============================================================
+
+@app.route('/performance', methods=['GET'])
+@rate_limit()
+def get_performance():
+    """Live trading performance metrics for Base44 dashboard"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Overall stats
+        c.execute('SELECT COUNT(*), SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END), SUM(pnl) FROM outcomes')
+        row = c.fetchone()
+        total_trades = row[0] or 0
+        wins = row[1] or 0
+        total_pnl = row[2] or 0.0
+        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+
+        # Per-symbol breakdown
+        c.execute('''
+            SELECT symbol,
+                   COUNT(*) as trades,
+                   SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins,
+                   SUM(pnl) as pnl,
+                   AVG(pnl) as avg_pnl
+            FROM outcomes GROUP BY symbol ORDER BY trades DESC
+        ''')
+        symbols = [{'symbol': r[0], 'trades': r[1], 'wins': r[2],
+                     'pnl': round(r[3] or 0, 2), 'avg_pnl': round(r[4] or 0, 4),
+                     'win_rate': round((r[2] or 0) / r[1] * 100, 1) if r[1] > 0 else 0}
+                    for r in c.fetchall()]
+
+        # Recent trades (last 20)
+        c.execute('''
+            SELECT symbol, outcome, pnl, entry_price, exit_price, timestamp
+            FROM outcomes ORDER BY received_at DESC LIMIT 20
+        ''')
+        recent = [{'symbol': r[0], 'outcome': r[1], 'pnl': r[2],
+                    'entry': r[3], 'exit': r[4], 'time': r[5]}
+                   for r in c.fetchall()]
+
+        # Equity curve (cumulative PnL over time)
+        c.execute('SELECT pnl, timestamp FROM outcomes ORDER BY received_at ASC')
+        cumulative = 0
+        equity_curve = []
+        for r in c.fetchall():
+            cumulative += (r[0] or 0)
+            equity_curve.append({'pnl': round(cumulative, 2), 'time': r[1]})
+
+        # Current regime per symbol (latest entropy readings)
+        c.execute('''
+            SELECT symbol, regime, quantum_entropy, dominant_state, timestamp
+            FROM entropy WHERE id IN (
+                SELECT MAX(id) FROM entropy GROUP BY symbol
+            )
+        ''')
+        regimes = [{'symbol': r[0], 'regime': r[1], 'entropy': r[2],
+                     'dominant_state': r[3], 'time': r[4]}
+                    for r in c.fetchall()]
+
+        conn.close()
+
+        return jsonify({
+            'total_trades': total_trades,
+            'wins': wins,
+            'win_rate': round(win_rate, 1),
+            'total_pnl': round(total_pnl, 2),
+            'symbols': symbols,
+            'recent_trades': recent,
+            'equity_curve': equity_curve,
+            'regimes': regimes
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/alerts', methods=['GET'])
+@rate_limit()
+def get_alerts():
+    """Recent significant events for notification system"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        alerts = []
+
+        # Check for drawdown (3+ consecutive losses)
+        c.execute('''
+            SELECT symbol, pnl, timestamp FROM outcomes
+            ORDER BY received_at DESC LIMIT 10
+        ''')
+        recent = c.fetchall()
+        streak = 0
+        for r in recent:
+            if (r[1] or 0) < 0:
+                streak += 1
+            else:
+                break
+        if streak >= 3:
+            alerts.append({
+                'type': 'DRAWDOWN',
+                'severity': 'high' if streak >= 5 else 'medium',
+                'message': f'{streak} consecutive losing trades',
+                'time': recent[0][2] if recent else None
+            })
+
+        # Check for large single loss
+        c.execute('''
+            SELECT symbol, pnl, timestamp FROM outcomes
+            WHERE pnl < -0.50 ORDER BY received_at DESC LIMIT 5
+        ''')
+        for r in c.fetchall():
+            alerts.append({
+                'type': 'LARGE_LOSS',
+                'severity': 'high',
+                'message': f'{r[0]}: ${r[1]:.2f} loss',
+                'time': r[2]
+            })
+
+        # Check win rate degradation (last 20 vs overall)
+        c.execute('SELECT COUNT(*), SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) FROM outcomes')
+        overall = c.fetchone()
+        overall_wr = (overall[1] or 0) / overall[0] * 100 if overall[0] > 0 else 50
+
+        c.execute('''
+            SELECT COUNT(*), SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)
+            FROM (SELECT pnl FROM outcomes ORDER BY received_at DESC LIMIT 20)
+        ''')
+        recent_stats = c.fetchone()
+        recent_wr = (recent_stats[1] or 0) / recent_stats[0] * 100 if recent_stats[0] > 0 else 50
+
+        if overall_wr - recent_wr > 10:
+            alerts.append({
+                'type': 'WIN_RATE_DROP',
+                'severity': 'medium',
+                'message': f'Win rate dropped: {recent_wr:.0f}% recent vs {overall_wr:.0f}% overall',
+                'time': datetime.utcnow().isoformat()
+            })
+
+        # Check for new regime changes
+        c.execute('''
+            SELECT symbol, regime, timestamp FROM entropy
+            ORDER BY received_at DESC LIMIT 5
+        ''')
+        for r in c.fetchall():
+            if r[1] and r[1].upper() == 'CHAOTIC':
+                alerts.append({
+                    'type': 'REGIME_CHAOTIC',
+                    'severity': 'medium',
+                    'message': f'{r[0]} entered CHAOTIC regime',
+                    'time': r[2]
+                })
+
+        conn.close()
+
+        return jsonify({'alerts': alerts, 'count': len(alerts)})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/backtest', methods=['POST'])
+@rate_limit(max_requests=RATE_LIMIT_MAX_ADMIN)
+@require_admin_key
+def trigger_backtest():
+    """Trigger backtest and return results from collected data"""
+    try:
+        data = request.get_json() or {}
+        symbol = data.get('symbol', 'BTCUSD')
+        days = min(data.get('days', 30), 90)
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Pull outcomes for the requested symbol and period
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        c.execute('''
+            SELECT symbol, outcome, pnl, entry_price, exit_price, timestamp
+            FROM outcomes
+            WHERE (symbol = ? OR ? = 'ALL')
+            AND received_at >= ?
+            ORDER BY received_at ASC
+        ''', (symbol, symbol, cutoff))
+
+        trades = c.fetchall()
+        if not trades:
+            conn.close()
+            return jsonify({'error': 'No trade data for this period', 'symbol': symbol, 'days': days}), 404
+
+        wins = sum(1 for t in trades if (t[2] or 0) > 0)
+        losses = len(trades) - wins
+        total_pnl = sum(t[2] or 0 for t in trades)
+        max_dd = 0
+        running_pnl = 0
+        peak = 0
+        for t in trades:
+            running_pnl += (t[2] or 0)
+            if running_pnl > peak:
+                peak = running_pnl
+            dd = peak - running_pnl
+            if dd > max_dd:
+                max_dd = dd
+
+        gross_profit = sum(t[2] for t in trades if (t[2] or 0) > 0)
+        gross_loss = abs(sum(t[2] for t in trades if (t[2] or 0) < 0))
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float('inf')
+
+        conn.close()
+
+        return jsonify({
+            'symbol': symbol,
+            'period_days': days,
+            'total_trades': len(trades),
+            'wins': wins,
+            'losses': losses,
+            'win_rate': round(wins / len(trades) * 100, 1),
+            'total_pnl': round(total_pnl, 2),
+            'max_drawdown': round(max_dd, 2),
+            'profit_factor': round(profit_factor, 2),
+            'avg_win': round(gross_profit / wins, 4) if wins > 0 else 0,
+            'avg_loss': round(gross_loss / losses, 4) if losses > 0 else 0,
+            'status': 'complete'
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/compile', methods=['POST'])
+@rate_limit(max_requests=RATE_LIMIT_MAX_ADMIN)
+@require_admin_key
+def trigger_compile():
+    """Queue an EA compilation request"""
+    try:
+        data = request.get_json()
+        if not data or 'ea_name' not in data:
+            return jsonify({'error': 'ea_name is required'}), 400
+
+        ea_name = data['ea_name']
+        # Sanitize - only allow alphanumeric, underscore, hyphen
+        if not all(c.isalnum() or c in ('_', '-') for c in ea_name):
+            return jsonify({'error': 'Invalid EA name'}), 400
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Create compile requests table if needed
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS compile_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ea_name TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                result TEXT,
+                requested_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT
+            )
+        ''')
+
+        c.execute(
+            'INSERT INTO compile_requests (ea_name) VALUES (?)',
+            (ea_name,)
+        )
+        request_id = c.lastrowid
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            'status': 'queued',
+            'request_id': request_id,
+            'ea_name': ea_name
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/compile/<int:request_id>', methods=['GET'])
+@rate_limit()
+def get_compile_status(request_id):
+    """Check compilation request status"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute(
+            'SELECT ea_name, status, result, requested_at, completed_at FROM compile_requests WHERE id = ?',
+            (request_id,)
+        )
+        row = c.fetchone()
+        conn.close()
+
+        if not row:
+            return jsonify({'error': 'Request not found'}), 404
+
+        return jsonify({
+            'request_id': request_id,
+            'ea_name': row[0],
+            'status': row[1],
+            'result': row[2],
+            'requested_at': row[3],
+            'completed_at': row[4]
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/', methods=['GET'])
 def home():
