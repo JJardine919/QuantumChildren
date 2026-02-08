@@ -1,0 +1,43 @@
+{
+    "VERSION": "2.0 - VPS Docker Config (SECURE - passwords in .env)",
+    "LAST_UPDATED": "2026-02-04",
+
+    "NOTE": "Passwords are loaded from environment variables. Set them in your Docker environment or .env file.",
+
+    "TRADING_SETTINGS": {
+        "MAX_LOSS_DOLLARS": 1.00,
+        "TP_MULTIPLIER": 3.0,
+        "AGENT_SL_MIN": 0.50,
+        "AGENT_SL_MAX": 1.00
+    },
+
+    "ACCOUNTS": {
+        "BG_INSTANT": {
+            "account": 366604,
+            "server": "BlueGuardian-Server",
+            "terminal_path_linux": "/app/mt5/terminal64.exe",
+            "magic": 366001,
+            "symbols": ["BTCUSD"],
+            "enabled": true,
+            "env_password_key": "BG_INSTANT_PASSWORD"
+        },
+        "BG_CHALLENGE": {
+            "account": 365060,
+            "server": "BlueGuardian-Server",
+            "terminal_path_linux": "/app/mt5/terminal64.exe",
+            "magic": 365001,
+            "symbols": ["BTCUSD"],
+            "enabled": true,
+            "env_password_key": "BG_CHALLENGE_PASSWORD"
+        },
+        "ATLAS": {
+            "account": 212000584,
+            "server": "AtlasFunded-Server",
+            "terminal_path_linux": "/app/mt5/terminal64.exe",
+            "magic": 212001,
+            "symbols": ["BTCUSD", "ETHUSD", "XAUUSD"],
+            "enabled": true,
+            "env_password_key": "ATLAS_PASSWORD"
+        }
+    }
+}

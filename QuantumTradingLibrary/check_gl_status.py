@@ -1,11 +1,23 @@
 import MetaTrader5 as mt5
+from credential_manager import get_credentials, CredentialError
 
-# GetLeveraged accounts
-GL_ACCOUNTS = {
-    1: {'account': 113326, 'password': '%bwN)IvJ5F', 'server': 'GetLeveraged-Trade'},
-    2: {'account': 113328, 'password': 'H*M5c7jpR7', 'server': 'GetLeveraged-Trade'},
-    3: {'account': 107245, 'password': '$86eCmFbXR', 'server': 'GetLeveraged-Trade'},
-}
+# GetLeveraged accounts - load from credential_manager
+def _load_gl_accounts():
+    """Load GetLeveraged account credentials from credential_manager"""
+    accounts = {}
+    for i, key in enumerate(['GL_1', 'GL_2', 'GL_3'], 1):
+        try:
+            creds = get_credentials(key)
+            accounts[i] = {
+                'account': creds['account'],
+                'password': creds['password'],
+                'server': creds['server']
+            }
+        except CredentialError as e:
+            print(f"Warning: {key} credentials not available: {e}")
+    return accounts
+
+GL_ACCOUNTS = _load_gl_accounts()
 
 # Try to connect (MT5 must be running)
 if not mt5.initialize():

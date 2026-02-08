@@ -4,10 +4,16 @@
 import paramiko
 import time
 import sys
+from credential_manager import get_vps_credentials, CredentialError
 
-VPS_HOST = "72.62.170.153"
-VPS_USER = "root"
-VPS_PASS = "gXRCBtbi21##"
+try:
+    creds = get_vps_credentials('VPS_1')
+    VPS_HOST = creds['host']
+    VPS_USER = creds['user']
+    VPS_PASS = creds['password']
+except CredentialError as e:
+    print(f"Error: {e}")
+    sys.exit(1)
 
 def execute_command(ssh, command, timeout=30):
     """Execute a command on the VPS and return output"""

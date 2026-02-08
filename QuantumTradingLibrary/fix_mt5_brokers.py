@@ -4,10 +4,28 @@
 import paramiko
 import time
 import sys
+from credential_manager import get_vps_credentials, get_credentials, CredentialError
 
-VPS_HOST = "72.62.170.153"
-VPS_USER = "root"
-VPS_PASS = "gXRCBtbi21##"
+# VPS Configuration - loaded from credential_manager
+try:
+    _vps_creds = get_vps_credentials("VPS_1")
+    VPS_HOST = _vps_creds["host"]
+    VPS_USER = _vps_creds["user"]
+    VPS_PASS = _vps_creds["password"]
+
+    # Get MT5 credentials for testing
+    _gl1_creds = get_credentials("GL_1")
+    GL1_ACCOUNT = _gl1_creds["account"]
+    GL1_PASSWORD = _gl1_creds["password"]
+    GL1_SERVER = _gl1_creds["server"]
+
+    _atlas_creds = get_credentials("ATLAS")
+    ATLAS_ACCOUNT = _atlas_creds["account"]
+    ATLAS_PASSWORD = _atlas_creds["password"]
+    ATLAS_SERVER = _atlas_creds["server"]
+except CredentialError as e:
+    print(f"ERROR: {e}")
+    sys.exit(1)
 
 def execute_command(ssh, command, timeout=30):
     """Execute a command on the VPS and return output"""
@@ -50,13 +68,13 @@ def main():
         print("\n[Step 3] Adding broker servers via MT5 terminal...")
 
         # First, let's create a Python script on the VPS to add servers
-        add_server_script = """
+        add_server_script = f"""
 import MetaTrader5 as mt5
 import sys
 
 # Initialize MT5
 if not mt5.initialize():
-    print(f"ERROR: MT5 initialize failed: {mt5.last_error()}")
+    print(f"ERROR: MT5 initialize failed: {{mt5.last_error()}}")
     sys.exit(1)
 
 print("MT5 initialized successfully")
@@ -65,9 +83,9 @@ print("MT5 initialized successfully")
 account_info = mt5.account_info()
 if account_info:
     print(f"Currently connected:")
-    print(f"  Account: {account_info.login}")
-    print(f"  Server: {account_info.server}")
-    print(f"  Balance: ${account_info.balance}")
+    print(f"  Account: {{account_info.login}}")
+    print(f"  Server: {{account_info.server}}")
+    print(f"  Balance: ${{account_info.balance}}")
 else:
     print("Not currently logged into any account")
 
@@ -75,60 +93,60 @@ else:
 mt5.shutdown()
 
 # Try to login to GetLeveraged
-print("\\nAttempting to login to GetLeveraged account 113326...")
+print("\\nAttempting to login to GetLeveraged account {GL1_ACCOUNT}...")
 if not mt5.initialize():
-    print(f"ERROR: MT5 initialize failed: {mt5.last_error()}")
+    print(f"ERROR: MT5 initialize failed: {{mt5.last_error()}}")
     sys.exit(1)
 
 login_result = mt5.login(
-    login=113326,
-    password="%bwN)IvJ5F",
-    server="GetLeveraged-Trade"
+    login={GL1_ACCOUNT},
+    password="{GL1_PASSWORD}",
+    server="{GL1_SERVER}"
 )
 
 if login_result:
     print("SUCCESS: Logged into GetLeveraged!")
     account_info = mt5.account_info()
     if account_info:
-        print(f"Account: {account_info.login}")
-        print(f"Server: {account_info.server}")
-        print(f"Balance: ${account_info.balance}")
-        print(f"Leverage: 1:{account_info.leverage}")
+        print(f"Account: {{account_info.login}}")
+        print(f"Server: {{account_info.server}}")
+        print(f"Balance: ${{account_info.balance}}")
+        print(f"Leverage: 1:{{account_info.leverage}}")
 
         # Check symbols
         symbols = mt5.symbols_get()
-        print(f"Available symbols: {len(symbols)}")
+        print(f"Available symbols: {{len(symbols)}}")
         if symbols:
-            print(f"Sample symbols: {[s.name for s in symbols[:5]]}")
+            print(f"Sample symbols: {{[s.name for s in symbols[:5]]}}")
 else:
     error = mt5.last_error()
-    print(f"FAILED to login to GetLeveraged: {error}")
+    print(f"FAILED to login to GetLeveraged: {{error}}")
     print("This likely means the server is not in the servers list")
 
 mt5.shutdown()
 
 # Try Atlas
-print("\\nAttempting to login to Atlas account 212000586...")
+print("\\nAttempting to login to Atlas account {ATLAS_ACCOUNT}...")
 if not mt5.initialize():
-    print(f"ERROR: MT5 initialize failed: {mt5.last_error()}")
+    print(f"ERROR: MT5 initialize failed: {{mt5.last_error()}}")
     sys.exit(1)
 
 login_result = mt5.login(
-    login=212000586,
-    password="4mqhwy3A",
-    server="AtlasFunded-Server"
+    login={ATLAS_ACCOUNT},
+    password="{ATLAS_PASSWORD}",
+    server="{ATLAS_SERVER}"
 )
 
 if login_result:
     print("SUCCESS: Logged into Atlas!")
     account_info = mt5.account_info()
     if account_info:
-        print(f"Account: {account_info.login}")
-        print(f"Server: {account_info.server}")
-        print(f"Balance: ${account_info.balance}")
+        print(f"Account: {{account_info.login}}")
+        print(f"Server: {{account_info.server}}")
+        print(f"Balance: ${{account_info.balance}}")
 else:
     error = mt5.last_error()
-    print(f"FAILED to login to Atlas: {error}")
+    print(f"FAILED to login to Atlas: {{error}}")
 
 mt5.shutdown()
 """

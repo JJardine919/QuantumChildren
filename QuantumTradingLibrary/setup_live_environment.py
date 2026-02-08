@@ -4,10 +4,23 @@
 import paramiko
 import time
 import sys
+from credential_manager import get_vps_credentials, get_credentials, CredentialError
 
-VPS_HOST = "72.62.170.153"
-VPS_USER = "root"
-VPS_PASS = "gXRCBtbi21##"
+# VPS Configuration - loaded from credential_manager
+try:
+    _vps_creds = get_vps_credentials("VPS_1")
+    VPS_HOST = _vps_creds["host"]
+    VPS_USER = _vps_creds["user"]
+    VPS_PASS = _vps_creds["password"]
+
+    # Get MT5 credentials for GL_1 (used in test script)
+    _gl1_creds = get_credentials("GL_1")
+    GL1_ACCOUNT = _gl1_creds["account"]
+    GL1_PASSWORD = _gl1_creds["password"]
+    GL1_SERVER = _gl1_creds["server"]
+except CredentialError as e:
+    print(f"ERROR: {e}")
+    sys.exit(1)
 
 def execute_command(ssh, command, timeout=30):
     """Execute a command on the VPS and return output"""
@@ -81,7 +94,7 @@ timeout 10 python3 etare_signal_generator.py 2>&1 | head -50
 
         # Step 6: Test MT5 connection
         print("\n[Step 6] Testing MT5 connection...")
-        test_script = """
+        test_script = f"""
 import MetaTrader5 as mt5
 
 print("Initializing MT5...")
@@ -89,23 +102,23 @@ if mt5.initialize():
     print("MT5 initialized successfully!")
 
     # Try to login with GetLeveraged
-    print("\\nAttempting login to GetLeveraged (113326)...")
-    if mt5.login(login=113326, password="%bwN)IvJ5F", server="GetLeveraged-Trade"):
+    print("\\nAttempting login to GetLeveraged ({GL1_ACCOUNT})...")
+    if mt5.login(login={GL1_ACCOUNT}, password="{GL1_PASSWORD}", server="{GL1_SERVER}"):
         print("SUCCESS: Logged into GetLeveraged!")
         account_info = mt5.account_info()
         if account_info:
-            print(f"Account: {account_info.login}")
-            print(f"Server: {account_info.server}")
-            print(f"Balance: ${account_info.balance}")
-            print(f"Leverage: 1:{account_info.leverage}")
+            print(f"Account: {{account_info.login}}")
+            print(f"Server: {{account_info.server}}")
+            print(f"Balance: ${{account_info.balance}}")
+            print(f"Leverage: 1:{{account_info.leverage}}")
     else:
         error = mt5.last_error()
-        print(f"FAILED to login: {error}")
+        print(f"FAILED to login: {{error}}")
         print("Note: Server may not be in servers list")
 
     mt5.shutdown()
 else:
-    print(f"Failed to initialize MT5: {mt5.last_error()}")
+    print(f"Failed to initialize MT5: {{mt5.last_error()}}")
 """
         output, error, code = execute_command(ssh,
             f"cd /root && DISPLAY=:0 python3 -c '{test_script}'", timeout=30)

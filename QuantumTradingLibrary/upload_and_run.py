@@ -1,8 +1,16 @@
 import paramiko
+import sys
+from credential_manager import get_vps_credentials, CredentialError
 
-HOST = '203.161.61.61'
-USER = 'root'
-PASS = 'tg1MNYK98Vt09no8uN'
+# VPS credentials - loaded from credential_manager
+try:
+    _vps_creds = get_vps_credentials("VPS_2")
+    HOST = _vps_creds["host"]
+    USER = _vps_creds["user"]
+    PASS = _vps_creds["password"]
+except CredentialError as e:
+    print(f"ERROR: {e}")
+    sys.exit(1)
 
 # Connect
 client = paramiko.SSHClient()

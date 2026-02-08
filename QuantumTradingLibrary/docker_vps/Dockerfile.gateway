@@ -1,0 +1,14 @@
+# MCP Gateway - Aggregates multiple MT5 accounts
+# Lightweight container that proxies to individual MT5 containers
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN pip install fastapi uvicorn httpx
+
+COPY mcp_gateway.py /app/
+
+EXPOSE 8080
+
+CMD ["python", "mcp_gateway.py"]

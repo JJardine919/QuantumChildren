@@ -1,10 +1,18 @@
 import paramiko
 import os
+import sys
 import stat
+from credential_manager import get_vps_credentials, CredentialError
 
-HOST = '203.161.61.61'
-USER = 'root'
-PASS = 'tg1MNYK98Vt09no8uN'
+try:
+    creds = get_vps_credentials('VPS_2')
+    HOST = creds['host']
+    USER = creds['user']
+    PASS = creds['password']
+except CredentialError as e:
+    print(f"Error: {e}")
+    sys.exit(1)
+
 REMOTE_BASE = '/opt/trading'
 LOCAL_BASE = r'C:\Users\jjj10\QuantumTradingLibrary'
 

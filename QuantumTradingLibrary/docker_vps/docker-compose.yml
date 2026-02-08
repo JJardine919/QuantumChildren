@@ -1,0 +1,72 @@
+# MT5 MCP Docker Compose
+# Deploy MT5 accounts on VPS
+
+services:
+  # Blue Guardian Instant ($5K)
+  mt5-bg-instant:
+    build:
+      context: .
+      dockerfile: Dockerfile.mt5
+    container_name: mt5-bg-instant
+    environment:
+      - MT5_ACCOUNT_KEY=BG_INSTANT
+      - MT5_CONFIG=/app/config.json
+      - PORT=8081
+      - DISPLAY=:99
+      - BG_INSTANT_PASSWORD=${BG_INSTANT_PASSWORD}
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - mt5-bg-instant-data:/root/.wine
+    restart: unless-stopped
+    networks:
+      - mt5-network
+
+  # Blue Guardian Challenge ($100K)
+  mt5-bg-challenge:
+    build:
+      context: .
+      dockerfile: Dockerfile.mt5
+    container_name: mt5-bg-challenge
+    environment:
+      - MT5_ACCOUNT_KEY=BG_CHALLENGE
+      - MT5_CONFIG=/app/config.json
+      - PORT=8082
+      - DISPLAY=:99
+      - BG_CHALLENGE_PASSWORD=${BG_CHALLENGE_PASSWORD}
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - mt5-bg-challenge-data:/root/.wine
+    restart: unless-stopped
+    networks:
+      - mt5-network
+
+  # MCP Gateway - Aggregates accounts
+  mcp-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: mcp-gateway
+    environment:
+      - PORT=8080
+      - BG_INSTANT_URL=http://mt5-bg-instant:8081
+      - BG_CHALLENGE_URL=http://mt5-bg-challenge:8082
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mt5-bg-instant
+      - mt5-bg-challenge
+    restart: unless-stopped
+    networks:
+      - mt5-network
+
+volumes:
+  mt5-bg-instant-data:
+  mt5-bg-challenge-data:
+
+networks:
+  mt5-network:
+    driver: bridge

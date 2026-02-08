@@ -1,10 +1,18 @@
 import paramiko
 import os
+import sys
 from scp import SCPClient
+from credential_manager import get_vps_credentials, CredentialError
 
-HOST = '203.161.61.61'
-USER = 'root'
-PASS = 'tg1MNYK98Vt09no8uN'
+# VPS credentials - loaded from credential_manager
+try:
+    _vps_creds = get_vps_credentials("VPS_2")
+    HOST = _vps_creds["host"]
+    USER = _vps_creds["user"]
+    PASS = _vps_creds["password"]
+except CredentialError as e:
+    print(f"ERROR: {e}")
+    sys.exit(1)
 
 def upload_file(local_path, remote_path):
     """Upload a file to VPS"""

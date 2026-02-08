@@ -1,9 +1,17 @@
 import paramiko
 import time
+import sys
+from credential_manager import get_vps_credentials, CredentialError
 
-VPS_HOST = "72.62.170.153"
-VPS_USER = "root"
-VPS_PASS = "gXRCBtbi21##"
+# VPS Configuration - loaded from credential_manager
+try:
+    _vps_creds = get_vps_credentials("VPS_1")
+    VPS_HOST = _vps_creds["host"]
+    VPS_USER = _vps_creds["user"]
+    VPS_PASS = _vps_creds["password"]
+except CredentialError as e:
+    print(f"ERROR: {e}")
+    sys.exit(1)
 
 def run():
     ssh = paramiko.SSHClient()
