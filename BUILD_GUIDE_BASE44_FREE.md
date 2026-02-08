@@ -1,6 +1,26 @@
-# ETARE QUANTUM TRADING SYSTEM - BUILD GUIDE
-## For: Cody Spiker
+# ETARE QUANTUM TRADING SYSTEM
+## Free Build Guide - Base 44 Edition
 ## From: QuantumChildren
+
+---
+
+## Welcome to the Network
+
+You're getting this for free because **we want your signals**.
+
+This isn't charity - it's a deal. You get a quantum-enhanced trading system that actually works. We get your trading signals fed back into our network to make the models better for everyone.
+
+The more nodes running this system, the smarter it gets. That's how signal hunting works.
+
+---
+
+## First 3 Signups - Free Week of Claude
+
+The first 3 people who sign up through Base 44 get a **free week of Claude** (the AI that helped build this system):
+
+**[Get Your Free Week of Claude](https://claude.ai/referral/gDGukD6U5g)**
+
+Use it to customize your setup, ask questions about the code, or build your own extensions.
 
 ---
 
@@ -117,8 +137,8 @@ COLLECTION_SERVER = "https://quantum-children.com/api/collect"  # Will be config
 LOCAL_BACKUP = Path("entropy_logs/")
 LOCAL_BACKUP.mkdir(exist_ok=True)
 
-# Your node identifier
-NODE_ID = "CODY_SPIKER_001"
+# Your node identifier - CHANGE THIS TO YOUR NAME/HANDLE
+NODE_ID = "BASE44_YOUR_NAME_HERE"
 
 def collect_signal(signal_data: dict):
     """Log signal locally and send to QuantumChildren"""
@@ -536,21 +556,23 @@ Based on backtesting (from context documents):
 - [ ] Database created (trading_history.db)
 - [ ] Test signal verified in EA logs
 - [ ] **entropy_collector.py in place**
-- [ ] **NODE_ID set to your identifier**
+- [ ] **NODE_ID set to your name/handle**
 
 ---
 
-## Data Agreement
+## The Deal
 
-By running this system, you agree that:
+This system is free. Here's what you agree to by using it:
 
-1. Your trading signals and entropy data will be collected
-2. Data is used to improve the shared model
-3. Your trading strategies remain private (only signals, not your account details)
-4. You will receive updated models as they improve
-5. This is a collaborative network - we all benefit from better data
+1. **Your signals get collected** - Every trade signal feeds back to QuantumChildren
+2. **We train better models** - Your data makes the system smarter for everyone
+3. **Your account stays private** - We only see signals, not your balance or personal info
+4. **You get updates** - When the models improve, you get the new versions
+5. **We all win** - More nodes = more data = better predictions
 
-**Contact:** QuantumChildren / Jim Jardine
+No hidden fees. No subscriptions. Just signals.
+
+**Questions?** QuantumChildren / Jim Jardine
 
 ---
 
@@ -568,6 +590,10 @@ By running this system, you agree that:
 
 ---
 
-*Document Version: 3.0 - Cody Spiker Edition*
+*Document Version: 4.0 - Base 44 Free Edition*
 *Last Updated: February 2026*
 *Network: QuantumChildren*
+
+---
+
+**Remember:** First 3 signups get a free week of Claude → [https://claude.ai/referral/gDGukD6U5g](https://claude.ai/referral/gDGukD6U5g)

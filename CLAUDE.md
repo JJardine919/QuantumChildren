@@ -57,6 +57,7 @@ If you need to change ANY of these values, **ASK THE USER FIRST**.
 | GL_1 | 113326 | GetLeveraged #1 | GetLeveraged MT5 |
 | GL_2 | 113328 | GetLeveraged #2 | GetLeveraged MT5 |
 | GL_3 | 107245 | GetLeveraged #3 | GetLeveraged MT5 |
+| FTMO | 1521063483 | FTMO Challenge | FTMO-Demo2 (81A933A9AFC5DE3C23B15CAB19C63850) |
 
 ---
 
@@ -67,6 +68,7 @@ If you need to change ANY of these values, **ASK THE USER FIRST**.
 - `BRAIN_BG_CHALLENGE.py` → 365060 only
 - `BRAIN_ATLAS.py` → 212000584 only
 - `BRAIN_GETLEVERAGED.py` → GetLeveraged accounts
+- `BRAIN_FTMO.py` → 1521063483 only
 
 ### For Monitoring (read-only):
 - `DASHBOARD_MONITOR.py` → Shows all accounts without affecting trades

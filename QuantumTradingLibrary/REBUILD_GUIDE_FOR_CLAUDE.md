@@ -114,7 +114,7 @@ ACCOUNTS = {
     },
     'BG_100K_CHALLENGE': {
         'account': 365060,
-        'password': ')8xaE(gAuU',
+        # Password loaded from credential_manager - see .env file
         'symbols': ['BTCUSD', 'ETHUSD'],
         'magic_number': 365001,
         'locked': True,

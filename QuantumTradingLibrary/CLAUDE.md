@@ -19,17 +19,22 @@
 ## CRITICAL: THESE VALUES ARE FIXED
 
 ```
-SL (MAX_LOSS_DOLLARS):    $1.00      ← NEVER CHANGE
-TP_MULTIPLIER:            3          ← NEVER CHANGE
-ROLLING_SL_MULTIPLIER:    1.5        ← NEVER CHANGE
-DYNAMIC_TP_PERCENT:       40         ← NEVER CHANGE
-CONFIDENCE_THRESHOLD:     0.22       ← NEVER CHANGE
-AGENT_SL_MIN:             $0.50      ← NEVER CHANGE
-AGENT_SL_MAX:             $1.00      ← NEVER CHANGE
+SL (MAX_LOSS_DOLLARS):    $1.00      ← Final SL after rolling
+SL (INITIAL_SL_DOLLARS):  $0.60      ← Starting SL (60 cents)
+TP_MULTIPLIER:            3          ← TP = 3x SL
+ROLLING_SL_MULTIPLIER:    1.5        ← SL rolls up by 1.5x
+DYNAMIC_TP_PERCENT:       50         ← 50% partial TP
+SET_DYNAMIC_TP:           true       ← Dynamic TP enabled
+ROLLING_SL_ENABLED:       true       ← Rolling SL enabled
+CONFIDENCE_THRESHOLD:     0.22       ← Min confidence to trade
+ATR_MULTIPLIER:           0.0438     ← ATR mult for SL distance (lot adjusts for $1 risk)
+AGENT_SL_MIN:             $0.50      ← Agent SL floor
+AGENT_SL_MAX:             $1.00      ← Agent SL ceiling
+REQUIRE_TRAINED_EXPERT:   true       ← Must have trained expert
 ```
 
 **Source of truth:** `MASTER_CONFIG.json`
-**How scripts get values:** `from config_loader import MAX_LOSS_DOLLARS, TP_MULTIPLIER, ...`
+**How scripts get values:** `from config_loader import MAX_LOSS_DOLLARS, INITIAL_SL_DOLLARS, ...`
 
 ---
 
@@ -95,6 +100,7 @@ If this returns any lines with `= number`, those are bugs.
 | GL_1 | 113326 | GetLeveraged #1 | GetLeveraged MT5 |
 | GL_2 | 113328 | GetLeveraged #2 | GetLeveraged MT5 |
 | GL_3 | 107245 | GetLeveraged #3 | GetLeveraged MT5 |
+| FTMO | 1521063483 | FTMO Challenge | FTMO-Demo2 (81A933A9AFC5DE3C23B15CAB19C63850) |
 
 ---
 
@@ -105,6 +111,7 @@ If this returns any lines with `= number`, those are bugs.
 - `BRAIN_BG_CHALLENGE.py` → 365060 only
 - `BRAIN_ATLAS.py` → 212000584 only
 - `BRAIN_GETLEVERAGED.py` → GetLeveraged accounts
+- `BRAIN_FTMO.py` → 1521063483 only
 
 ### For Monitoring (read-only):
 - `DASHBOARD_MONITOR.py` → Shows all accounts without affecting trades
@@ -114,11 +121,20 @@ If this returns any lines with `= number`, those are bugs.
 - `MASTER_CONFIG.json` → Edit this for ALL settings
 
 ### For Safety (CRITICAL):
-- `STOPLOSS_WATCHDOG.py` → MONITORS and FORCE-CLOSES positions exceeding loss limit
-  - Run: `python STOPLOSS_WATCHDOG.py --account ATLAS --limit 1.50`
-  - This is a SAFETY NET - runs independently of trading scripts
-  - Closes ANY position (Python, MQL5 EA, manual) that exceeds loss limit
-  - Check interval: 5 seconds
+- `STOPLOSS_WATCHDOG.py` → Legacy watchdog (force-close only)
+- `STOPLOSS_WATCHDOG_V2.py` → ENHANCED watchdog (RECOMMENDED)
+  - Run: `python STOPLOSS_WATCHDOG_V2.py --account ATLAS --limit 1.50`
+  - Auto-detects and applies SL to positions MISSING stop losses (SL=0.0)
+  - Force-closes positions exceeding loss limit
+  - Detects ROGUE trades (unknown magic numbers, manual trades)
+  - Monitors total drawdown across all positions
+  - Comprehensive event logging to `watchdog_events.jsonl`
+  - Check interval: 3 seconds (configurable)
+  - Options: `--force-sl`, `--emergency-sl-dollars 2.00`, `--drawdown 500`
+
+### MCP Server Tools (for Claude):
+- `mt5_scan_no_sl` → Scan all positions for missing SL and rogue magic numbers
+- `mt5_force_sl` → Apply emergency SL to a specific position by ticket
 
 ---
 
@@ -127,6 +143,41 @@ If this returns any lines with `= number`, those are bugs.
 Collection server: `http://203.161.61.61:8888`
 
 All scripts should send signals to this server using `entropy_collector.py`.
+
+---
+
+## PRE-LAUNCH VALIDATION
+
+**IMPORTANT:** BRAIN scripts now enforce pre-launch validation before trading.
+
+**Validator:** `prelaunch_validator.py`
+
+**What it checks:**
+1. Trained experts exist for trading symbols (in `top_50_experts/`)
+2. Collection server is reachable (warning only)
+3. Recent data collection activity (warning only)
+
+**Usage in BRAIN scripts:**
+```python
+from prelaunch_validator import validate_prelaunch
+
+if not validate_prelaunch(symbols=['BTCUSD', 'XAUUSD']):
+    sys.exit(1)
+```
+
+**CLI usage:**
+```bash
+python prelaunch_validator.py --symbols BTCUSD XAUUSD ETHUSD
+python prelaunch_validator.py --require-server  # Fail if server down
+python prelaunch_validator.py --bypass          # Warn but don't block
+```
+
+**Pre-launch workflow:**
+1. Start compression server (`quantum_server.py`)
+2. Collect data (runs automatically with BRAIN scripts)
+3. Train experts: `python Master_Train.py`
+4. Validate: `python prelaunch_validator.py`
+5. Launch trading: `python BRAIN_ATLAS.py`
 
 ---
 
