@@ -11,10 +11,16 @@ import MetaTrader5 as mt5
 from datetime import datetime
 import time
 import json
+import sys
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 import threading
 import atexit
+from pathlib import Path
+
+# Add QuantumTradingLibrary to path for credential_manager
+sys.path.insert(0, str(Path(__file__).parent / "QuantumTradingLibrary"))
+from credential_manager import get_credentials, CredentialError
 
 # Register cleanup on script exit
 atexit.register(mt5.shutdown)
@@ -28,26 +34,45 @@ OBSERVE_ONLY = False  # When True, uses current terminal state without login
 # CONFIGURATION - AGGRESSIVE COMPETITION MODE
 # =============================================================================
 
-# Blue Guardian Accounts
+# Blue Guardian Accounts - loaded from credential_manager
 # NOTE: Using ONE account to avoid AutoTrading disable on account switch
 # For multi-account, need separate MT5 terminals per account
-ACCOUNTS = [
-    {
-        "name": "BG_100K_CHALLENGE",
-        "account": 365060,
-        "password": ")8xaE(gAuU",
-        "server": "BlueGuardian-Server",
-        "magic_number": 365001,
-    },
+def _load_accounts():
+    """Load account credentials from credential_manager"""
+    accounts = []
+    try:
+        creds = get_credentials('BG_CHALLENGE')
+        accounts.append({
+            "name": "BG_100K_CHALLENGE",
+            "account": creds['account'],
+            "password": creds['password'],
+            "server": creds['server'],
+            "magic_number": 365001,
+        })
+    except CredentialError as e:
+        print(f"[!] Failed to load BG_CHALLENGE credentials: {e}")
+        accounts.append({
+            "name": "BG_100K_CHALLENGE",
+            "account": 365060,
+            "password": "",
+            "server": "BlueGuardian-Server",
+            "magic_number": 365001,
+        })
     # Commented out - add back when running separate terminals
-    # {
-    #     "name": "BG_5K_INSTANT",
-    #     "account": 366604,
-    #     "password": "YF^oHH&4Nm",
-    #     "server": "BlueGuardian-Server",
-    #     "magic_number": 366001,
-    # },
-]
+    # try:
+    #     creds = get_credentials('BG_INSTANT')
+    #     accounts.append({
+    #         "name": "BG_5K_INSTANT",
+    #         "account": creds['account'],
+    #         "password": creds['password'],
+    #         "server": creds['server'],
+    #         "magic_number": 366001,
+    #     })
+    # except CredentialError:
+    #     pass
+    return accounts
+
+ACCOUNTS = _load_accounts()
 
 CONFIG = {
     "terminal_path": r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe",

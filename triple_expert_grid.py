@@ -16,23 +16,44 @@ import MetaTrader5 as mt5
 from datetime import datetime
 import time
 import json
+import sys
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 import atexit
+from pathlib import Path
+
+# Add QuantumTradingLibrary to path for credential_manager
+sys.path.insert(0, str(Path(__file__).parent / "QuantumTradingLibrary"))
+from credential_manager import get_credentials, CredentialError
 
 atexit.register(mt5.shutdown)
 
 # =============================================================================
-# ACCOUNT CONFIGURATION
+# ACCOUNT CONFIGURATION - Password loaded from credential_manager
 # =============================================================================
 
-ACCOUNT = {
-    "name": "ATLAS_300K_GRID",
-    "account": 212000584,
-    "password": "M6NLk79MN@",
-    "server": "AtlasFunded-Server",
-    "magic_base": 212001,  # Each expert gets magic_base + expert_id
-}
+def _load_atlas_account():
+    """Load Atlas account with password from credential_manager"""
+    try:
+        creds = get_credentials('ATLAS')
+        return {
+            "name": "ATLAS_300K_GRID",
+            "account": creds['account'],
+            "password": creds['password'],
+            "server": creds['server'],
+            "magic_base": 212001,  # Each expert gets magic_base + expert_id
+        }
+    except CredentialError as e:
+        print(f"[!] Failed to load ATLAS credentials: {e}")
+        return {
+            "name": "ATLAS_300K_GRID",
+            "account": 212000584,
+            "password": "",
+            "server": "AtlasFunded-Server",
+            "magic_base": 212001,
+        }
+
+ACCOUNT = _load_atlas_account()
 
 # =============================================================================
 # GRID CONFIGURATION

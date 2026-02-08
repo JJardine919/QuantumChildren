@@ -1,0 +1,82 @@
+# Quantum Children Signal Network - Docker Deployment
+#
+# Quick Start:
+#   docker-compose up -d
+#
+# Then import QuantumChildren_Network_Cascade.json into n8n
+
+version: '3.8'
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: qc-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # Core settings
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-quantumchildren}
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+
+      # Quantum Children network settings
+      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - NODE_ID=${NODE_ID:-QC-DOCKER}
+      - DOWNSTREAM_NODES=${DOWNSTREAM_NODES:-[]}
+
+      # Performance
+      - EXECUTIONS_DATA_SAVE_ON_ERROR=all
+      - EXECUTIONS_DATA_SAVE_ON_SUCCESS=none
+      - EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS=false
+
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/home/node/workflows:ro
+    networks:
+      - qc-network
+
+  # Optional: Local Ollama for LLM analysis
+  ollama:
+    image: ollama/ollama:latest
+    container_name: qc-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - qc-network
+    profiles:
+      - with-llm
+
+  # Optional: Signal emitter service
+  signal-emitter:
+    build:
+      context: .
+      dockerfile: Dockerfile.emitter
+    container_name: qc-emitter
+    restart: unless-stopped
+    environment:
+      - WEBHOOK_URL=http://n8n:5678/webhook/quantum-signal
+      - EMISSION_INTERVAL=60
+      - SYMBOLS=BTCUSD,ETHUSD,XAUUSD
+    depends_on:
+      - n8n
+    networks:
+      - qc-network
+    profiles:
+      - with-emitter
+
+networks:
+  qc-network:
+    driver: bridge
+
+volumes:
+  n8n_data:
+  ollama_data:
