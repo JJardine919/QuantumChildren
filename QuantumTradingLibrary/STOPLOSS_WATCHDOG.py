@@ -19,17 +19,17 @@ from pathlib import Path
 
 import MetaTrader5 as mt5
 
-# Load config
+# Load config - WATCHDOG_LIMIT from MASTER_CONFIG.json
 try:
     from config_loader import MAX_LOSS_DOLLARS, AGENT_SL_MAX, ACCOUNTS
     from credential_manager import get_credentials, CredentialError
     LOSS_LIMIT = AGENT_SL_MAX  # Use AGENT_SL_MAX from config ($1.00)
 except ImportError:
-    LOSS_LIMIT = 1.50  # Fallback
+    LOSS_LIMIT = 1.00  # Fallback only if config unavailable
     CredentialError = Exception  # Fallback
 
-# Override - hard cap at $1.00 no matter what
-MAX_LOSS_PER_TRADE = 1.00
+# Use config value - do NOT hardcode
+MAX_LOSS_PER_TRADE = LOSS_LIMIT
 
 logging.basicConfig(
     level=logging.INFO,

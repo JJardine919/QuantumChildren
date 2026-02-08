@@ -2,11 +2,13 @@
 import MetaTrader5 as mt5
 import time
 import sys
+from credential_manager import get_credentials
 
 # --- CONFIG ---
-LOGIN = 1512338719
-PASSWORD = "l6SxHm$@"
-SERVER = "FTMO-Demo"
+_creds = get_credentials('FTMO')
+LOGIN = _creds['account']
+PASSWORD = _creds['password']
+SERVER = _creds['server']
 SYMBOL = "BTCUSD"
 VOLUME = 0.10
 DEVIATION = 20

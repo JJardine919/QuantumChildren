@@ -1,15 +1,16 @@
 
 import MetaTrader5 as mt5
 import sys
+from credential_manager import get_credentials
 
 def test():
     if not mt5.initialize():
         print("MT5 Init Failed")
         return
 
+    creds = get_credentials('FTMO')
     accs = [
-        {"login": 1512338719, "password": "l6SxHm$@", "server": "FTMO-Demo"},
-        {"login": 1512287880, "password": "1a3Q@fT24@LEw", "server": "FTMO-Demo"}
+        {"login": creds['account'], "password": creds['password'], "server": creds['server']}
     ]
 
     for acc in accs:

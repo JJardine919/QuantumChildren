@@ -1,11 +1,12 @@
 
 import MetaTrader5 as mt5
 import sys
+from credential_manager import get_credentials
 
-# FTMO Demo Credentials
+# FTMO Credentials from .env
+_creds = get_credentials('FTMO')
 FTMO_ACCOUNTS = [
-    {"login": 1512338719, "password": "l6SxHm$@", "server": "FTMO-Demo"},
-    {"login": 1512287880, "password": "1a3Q@fT24@LEw", "server": "FTMO-Demo"}
+    {"login": _creds['account'], "password": _creds['password'], "server": _creds['server']}
 ]
 
 if not mt5.initialize():

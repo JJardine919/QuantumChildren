@@ -8,8 +8,11 @@ echo.
 
 cd /d "%~dp0"
 
-REM Use .venv311 if available, otherwise try system Python
-if exist ".venv311\Scripts\python.exe" (
+REM Prefer GPU venv (has MT5, torch, everything needed)
+if exist ".venv312_gpu\Scripts\python.exe" (
+    echo Using .venv312_gpu Python 3.12 [GPU]...
+    .venv312_gpu\Scripts\python.exe SIGNAL_FARM_ENGINE.py
+) else if exist ".venv311\Scripts\python.exe" (
     echo Using .venv311 Python...
     .venv311\Scripts\python.exe SIGNAL_FARM_ENGINE.py
 ) else if exist ".venv\Scripts\python.exe" (
