@@ -17,7 +17,7 @@ input group "=== ACCOUNT ==="
 input int      MagicNumber       = 365001;    // Magic Number
 
 input group "=== TRADING ==="
-input double   LotSize           = 0.06;      // Lot Size
+input double   LotSize           = 0.03;      // Lot Size
 input int      MaxPositions      = 5;         // Max Positions
 input int      GridPoints        = 500;       // Grid Spacing (points)
 input int      TPPoints          = 450;       // Take Profit (points)
@@ -27,6 +27,16 @@ input int      CheckSec          = 10;        // Check Interval (sec)
 //| GLOBALS                                                           |
 //+------------------------------------------------------------------+
 datetime g_lastCheck = 0;
+
+// Virtual TP tracking for hidden TP management
+struct VirtualTP
+{
+   ulong  ticket;
+   double entryPrice;
+   double hiddenTP;
+};
+VirtualTP g_virtualTPs[];
+int g_virtualTPCount = 0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                              |
@@ -206,8 +216,8 @@ void OpenBuy(int level)
    request.volume = lot;
    request.type = ORDER_TYPE_BUY;
    request.price = price;
-   request.sl = 0;
-   request.tp = tp;  // Visible TP for reliability
+   request.sl = 0;   // HIDDEN - managed internally
+   request.tp = 0;   // HIDDEN - managed internally
    request.deviation = 30;
    request.magic = MagicNumber;
    request.comment = StringFormat("BG_L%d", level);
@@ -236,8 +246,16 @@ void OpenBuy(int level)
 
    if(result.retcode == TRADE_RETCODE_DONE)
    {
+      // Track hidden TP
+      int idx = g_virtualTPCount;
+      ArrayResize(g_virtualTPs, idx + 1);
+      g_virtualTPs[idx].ticket = result.order;
+      g_virtualTPs[idx].entryPrice = price;
+      g_virtualTPs[idx].hiddenTP = tp;
+      g_virtualTPCount = idx + 1;
+
       Print(">>> BUY L", level, " FILLED @ ", DoubleToString(result.price, 2),
-            " ticket=", result.order);
+            " ticket=", result.order, " hiddenTP=", DoubleToString(tp, 2));
    }
    else
    {
@@ -246,21 +264,73 @@ void OpenBuy(int level)
 }
 
 //+------------------------------------------------------------------+
-//| Manage positions - check if TP hit (backup to broker TP)           |
+//| Manage positions - hidden TP management                           |
 //+------------------------------------------------------------------+
 void ManagePositions()
 {
-   // Positions with broker TP will auto-close
-   // This is just for logging
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   // Sync: remove closed positions from tracking
+   for(int i = g_virtualTPCount - 1; i >= 0; i--)
    {
-      ulong ticket = PositionGetTicket(i);
-      if(!PositionSelectByTicket(ticket)) continue;
-      if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
-      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      bool found = false;
+      for(int p = PositionsTotal() - 1; p >= 0; p--)
+      {
+         if(PositionGetTicket(p) == g_virtualTPs[i].ticket)
+         {
+            found = true;
+            break;
+         }
+      }
+      if(!found)
+      {
+         // Remove from tracking
+         for(int j = i; j < g_virtualTPCount - 1; j++)
+            g_virtualTPs[j] = g_virtualTPs[j + 1];
+         g_virtualTPCount--;
+         ArrayResize(g_virtualTPs, g_virtualTPCount);
+      }
+   }
 
-      double profit = PositionGetDouble(POSITION_PROFIT);
-      // Just monitor - broker handles TP
+   // Check hidden TP for each tracked position
+   for(int i = g_virtualTPCount - 1; i >= 0; i--)
+   {
+      ulong ticket = g_virtualTPs[i].ticket;
+      if(!PositionSelectByTicket(ticket)) continue;
+
+      double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+      ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+
+      bool hitTP = false;
+      if(posType == POSITION_TYPE_BUY && currentPrice >= g_virtualTPs[i].hiddenTP) hitTP = true;
+      if(posType == POSITION_TYPE_SELL && currentPrice <= g_virtualTPs[i].hiddenTP) hitTP = true;
+
+      if(hitTP)
+      {
+         Print(">>> HIDDEN TP HIT - Closing ticket ", ticket, " at ", DoubleToString(currentPrice, 2));
+         double volume = PositionGetDouble(POSITION_VOLUME);
+
+         MqlTradeRequest req;
+         MqlTradeResult res;
+         ZeroMemory(req);
+         ZeroMemory(res);
+
+         req.action = TRADE_ACTION_DEAL;
+         req.position = ticket;
+         req.symbol = _Symbol;
+         req.volume = volume;
+         req.type = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+         req.price = (posType == POSITION_TYPE_BUY) ?
+                     SymbolInfoDouble(_Symbol, SYMBOL_BID) :
+                     SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+         req.deviation = 30;
+         req.magic = MagicNumber;
+         req.type_filling = GetFilling();
+
+         if(OrderSend(req, res))
+         {
+            if(res.retcode == TRADE_RETCODE_DONE)
+               Print(">>> Position closed at TP");
+         }
+      }
    }
 }
 

@@ -23,7 +23,7 @@ input int      InpMagicBase        = 114000;      // Magic Number Base (ETH uses
 
 input group "=== TRADING CONFIGURATION ==="
 input double   InpBaseLot          = 0.01;        // Base Lot Size
-input double   InpMaxLot           = 0.10;        // Max Lot Size
+input double   InpMaxLot           = 0.04;        // Max Lot Size
 input int      InpMaxPositions     = 5;           // Max Grid Positions
 input double   InpRiskPercent      = 0.5;         // Risk Per Trade %
 

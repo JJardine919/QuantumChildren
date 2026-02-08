@@ -23,7 +23,7 @@ input int      InpMagicBase        = 113000;      // Magic Number Base
 
 input group "=== TRADING CONFIGURATION ==="
 input double   InpBaseLot          = 0.01;        // Base Lot Size
-input double   InpMaxLot           = 0.05;        // Max Lot Size
+input double   InpMaxLot           = 0.04;        // Max Lot Size
 input int      InpMaxPositions     = 5;           // Max Grid Positions
 input double   InpRiskPercent      = 0.5;         // Risk Per Trade %
 

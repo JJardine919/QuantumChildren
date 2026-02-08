@@ -4,9 +4,9 @@
 //|                              Ready for MQL5 Market Signal        |
 //+------------------------------------------------------------------+
 #property copyright "QuantumChildren"
-#property version   "1.00"
+#property version   "2.00"
 #property description "Dynamic TP/SL with LLM monitoring"
-#property strict
+// NOTE: #property strict removed - MQL4 only, not valid in MQL5
 
 //+------------------------------------------------------------------+
 //| HARD-CODED CORE VALUES - DO NOT CHANGE                           |
@@ -15,7 +15,7 @@
 #define TP_RATIO           3         // Take Profit ratio
 #define SL_BASE            1         // Stop Loss base
 #define SL_MULT            1.5       // Stop Loss multiplier
-#define DYN_TP_PCT         30        // Dynamic TP adjustment %
+#define DYN_TP_PCT         50        // Dynamic TP adjustment %
 #define USE_DYN_TP         true      // Use Dynamic TP
 #define ROLLING_SL         true      // Rolling/Trailing SL enabled
 #define INITIAL_SL_POINTS  50        // Initial SL in points (LLM monitors)
@@ -26,7 +26,7 @@
 input group "=== Account Settings ==="
 input int      InpMagicNumber     = 365100;        // Magic Number
 input double   InpVolume          = 0.01;          // Lot Size
-input string   InpSymbol          = "";            // Symbol (blank = current)
+input string   InpSymbol          = "BTC";         // Symbol (blank = current)
 
 input group "=== LLM Integration ==="
 input bool     InpUseLLM          = true;          // Enable LLM Monitoring
@@ -55,6 +55,12 @@ double g_atrBuffer[];
 double g_emaFastBuffer[];
 double g_emaSlowBuffer[];
 
+// Cached symbol properties
+double g_point;
+int    g_digits;
+double g_tickSize;
+int    g_stopsLevel;
+
 // LLM state
 datetime g_lastLLMCheck = 0;
 bool g_llmEmergencyStop = false;
@@ -77,12 +83,121 @@ struct DynamicPosition
    double initialTP;
    double currentSL;      // Rolling SL
    double currentTP;      // Dynamic TP
-   double highWaterPrice; // For rolling SL
-   double lowWaterPrice;  // For rolling SL (shorts)
+   double highWaterPrice;  // For rolling SL
+   double lowWaterPrice;   // For rolling SL (shorts)
    bool   inProfit;
+   int    tpExtensions;    // FIX: Track TP extension count to prevent runaway
    datetime openTime;
 };
 DynamicPosition g_positions[];
+
+//+------------------------------------------------------------------+
+//| Normalize price to symbol tick size                                |
+//+------------------------------------------------------------------+
+double NormalizePrice(double price)
+{
+   if(g_tickSize <= 0) return NormalizeDouble(price, g_digits);
+   return NormalizeDouble(MathRound(price / g_tickSize) * g_tickSize, g_digits);
+}
+
+//+------------------------------------------------------------------+
+//| Enforce minimum stops level distance                              |
+//+------------------------------------------------------------------+
+void EnforceStopsLevel(double price, int direction, double &sl, double &tp)
+{
+   double minDist = g_stopsLevel * g_point;
+   if(minDist <= 0) return;
+
+   if(direction > 0) // BUY
+   {
+      if(sl > 0 && (price - sl) < minDist)
+         sl = NormalizePrice(price - minDist);
+      if(tp > 0 && (tp - price) < minDist)
+         tp = NormalizePrice(price + minDist);
+   }
+   else // SELL
+   {
+      if(sl > 0 && (sl - price) < minDist)
+         sl = NormalizePrice(price + minDist);
+      if(tp > 0 && (price - tp) < minDist)
+         tp = NormalizePrice(price - minDist);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Validate and resolve symbol name                                  |
+//+------------------------------------------------------------------+
+bool ValidateSymbol(string &symbol)
+{
+   // Try exact match first
+   if(SymbolSelect(symbol, true))
+      return true;
+
+   // Try common suffixes
+   string suffixes[] = {"USD", "USDT", ".i", "m", ".raw", ".ecn", ".std", "usd"};
+   for(int i = 0; i < ArraySize(suffixes); i++)
+   {
+      string test = symbol + suffixes[i];
+      if(SymbolSelect(test, true))
+      {
+         Print("Symbol resolved: ", symbol, " -> ", test);
+         symbol = test;
+         return true;
+      }
+   }
+
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Find actual position ticket after order fill                      |
+//+------------------------------------------------------------------+
+ulong FindPositionTicket(ulong orderTicket)
+{
+   // First try: look through open positions by magic/symbol
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong posTicket = PositionGetTicket(i);
+      if(posTicket == 0) continue;
+      if(!PositionSelectByTicket(posTicket)) continue;
+      if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+      if(PositionGetString(POSITION_SYMBOL) != g_symbol) continue;
+
+      // Check if this position was opened by our order
+      if(PositionGetInteger(POSITION_IDENTIFIER) == (long)orderTicket)
+         return posTicket;
+   }
+
+   // Second try: use deal history to find position
+   if(HistorySelectByPosition((long)orderTicket))
+   {
+      for(int i = HistoryDealsTotal() - 1; i >= 0; i--)
+      {
+         ulong dealTicket = HistoryDealGetTicket(i);
+         if(dealTicket == 0) continue;
+         ulong posId = (ulong)HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+         if(posId > 0)
+         {
+            // Try selecting this as a position
+            if(PositionSelectByTicket(posId))
+               return posId;
+         }
+      }
+   }
+
+   // Third try: find most recent position matching magic/symbol
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong posTicket = PositionGetTicket(i);
+      if(posTicket == 0) continue;
+      if(!PositionSelectByTicket(posTicket)) continue;
+      if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+      if(PositionGetString(POSITION_SYMBOL) != g_symbol) continue;
+      return posTicket;
+   }
+
+   return 0;
+}
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
@@ -91,6 +206,25 @@ int OnInit()
 {
    g_symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
 
+   // Validate symbol
+   if(!ValidateSymbol(g_symbol))
+   {
+      Print("ERROR: Symbol '", g_symbol, "' not found. Trying current chart symbol.");
+      g_symbol = _Symbol;
+   }
+
+   // Cache symbol properties
+   g_point      = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+   g_digits     = (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS);
+   g_tickSize   = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
+   g_stopsLevel = (int)SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
+
+   if(g_point <= 0)
+   {
+      Print("ERROR: Invalid symbol properties for ", g_symbol);
+      return INIT_FAILED;
+   }
+
    // Create indicators
    g_atrHandle = iATR(g_symbol, PERIOD_M5, InpATRPeriod);
    g_emaFastHandle = iMA(g_symbol, PERIOD_M5, InpEMAFast, 0, MODE_EMA, PRICE_CLOSE);
@@ -98,7 +232,7 @@ int OnInit()
 
    if(g_atrHandle == INVALID_HANDLE || g_emaFastHandle == INVALID_HANDLE || g_emaSlowHandle == INVALID_HANDLE)
    {
-      Print("ERROR: Failed to create indicators");
+      Print("ERROR: Failed to create indicators for ", g_symbol);
       return INIT_FAILED;
    }
 
@@ -113,8 +247,9 @@ int OnInit()
    g_lastDayReset = TimeCurrent();
 
    Print("================================================");
-   Print("BlueGuardian Dynamic - Initialized");
-   Print("Symbol: ", g_symbol);
+   Print("BlueGuardian Dynamic v2.00 - Initialized");
+   Print("Symbol: ", g_symbol, " (digits=", g_digits, " point=", g_point, " tickSize=", g_tickSize, ")");
+   Print("Stops Level: ", g_stopsLevel, " points");
    Print("------------------------------------------------");
    Print("HARD-CODED VALUES:");
    Print("  ATR_MULT:     ", ATR_MULT);
@@ -137,9 +272,9 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
-   if(g_emaFastHandle != INVALID_HANDLE) IndicatorRelease(g_emaFastHandle);
-   if(g_emaSlowHandle != INVALID_HANDLE) IndicatorRelease(g_emaSlowHandle);
+   if(g_atrHandle != INVALID_HANDLE) { IndicatorRelease(g_atrHandle); g_atrHandle = INVALID_HANDLE; }
+   if(g_emaFastHandle != INVALID_HANDLE) { IndicatorRelease(g_emaFastHandle); g_emaFastHandle = INVALID_HANDLE; }
+   if(g_emaSlowHandle != INVALID_HANDLE) { IndicatorRelease(g_emaSlowHandle); g_emaSlowHandle = INVALID_HANDLE; }
 }
 
 //+------------------------------------------------------------------+
@@ -147,13 +282,17 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   // Update high water mark on every tick
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
+   g_highWaterMark = MathMax(g_highWaterMark, MathMax(balance, equity));
+
    // Check LLM for emergency stop
    if(InpUseLLM && InpLLMEmergencyOff)
    {
       CheckLLMStatus();
       if(g_llmEmergencyStop)
       {
-         // Close all positions and halt
          CloseAllPositions("LLM Emergency Stop");
          return;
       }
@@ -165,7 +304,7 @@ void OnTick()
    // Check for new bar
    static datetime lastBar = 0;
    datetime currentBar = iTime(g_symbol, PERIOD_M5, 0);
-   if(currentBar == lastBar) return;
+   if(currentBar == 0 || currentBar == lastBar) return;  // FIX: guard against iTime returning 0
    lastBar = currentBar;
 
    // Daily reset
@@ -196,9 +335,9 @@ double CalculateInitialTP(double entryPrice, int direction)
    double tpDistance = atr * ATR_MULT * TP_RATIO;
 
    if(direction > 0) // BUY
-      return entryPrice + tpDistance;
+      return NormalizePrice(entryPrice + tpDistance);
    else // SELL
-      return entryPrice - tpDistance;
+      return NormalizePrice(entryPrice - tpDistance);
 }
 
 //+------------------------------------------------------------------+
@@ -206,13 +345,12 @@ double CalculateInitialTP(double entryPrice, int direction)
 //+------------------------------------------------------------------+
 double CalculateInitialSL(double entryPrice, int direction)
 {
-   double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
-   double slDistance = INITIAL_SL_POINTS * point * SL_MULT;
+   double slDistance = INITIAL_SL_POINTS * g_point * SL_MULT;
 
    if(direction > 0) // BUY
-      return entryPrice - slDistance;
+      return NormalizePrice(entryPrice - slDistance);
    else // SELL
-      return entryPrice + slDistance;
+      return NormalizePrice(entryPrice + slDistance);
 }
 
 //+------------------------------------------------------------------+
@@ -241,11 +379,14 @@ void ExecuteTrade(int direction)
    MqlTick tick;
    if(!SymbolInfoTick(g_symbol, tick)) return;
 
-   double price = (direction > 0) ? tick.ask : tick.bid;
+   double price = NormalizePrice((direction > 0) ? tick.ask : tick.bid);
    double initialTP = CalculateInitialTP(price, direction);
    double initialSL = CalculateInitialSL(price, direction);
 
    if(initialTP == 0) return;
+
+   // Enforce minimum stops distance
+   EnforceStopsLevel(price, direction, initialSL, initialTP);
 
    MqlTradeRequest request;
    MqlTradeResult result;
@@ -257,8 +398,8 @@ void ExecuteTrade(int direction)
    request.volume = InpVolume;
    request.type = (direction > 0) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
    request.price = price;
-   request.sl = initialSL;  // Set initial SL (LLM will monitor)
-   request.tp = initialTP;  // Set initial TP (dynamic adjustment enabled)
+   request.sl = initialSL;
+   request.tp = initialTP;
    request.deviation = 50;
    request.magic = InpMagicNumber;
    request.comment = "BG_Dynamic";
@@ -267,36 +408,55 @@ void ExecuteTrade(int direction)
 
    if(!OrderSend(request, result))
    {
-      Print("Order failed: ", GetLastError());
+      Print("Order failed: ", GetLastError(),
+            " | Price=", DoubleToString(price, g_digits),
+            " | SL=", DoubleToString(initialSL, g_digits),
+            " | TP=", DoubleToString(initialTP, g_digits));
       return;
    }
 
-   if(result.retcode != TRADE_RETCODE_DONE)
+   if(result.retcode != TRADE_RETCODE_DONE && result.retcode != TRADE_RETCODE_PLACED)
    {
-      Print("Order rejected: ", result.comment);
+      Print("Order rejected: ", result.retcode, " - ", result.comment);
       return;
    }
+
+   // FIX: Find actual position ticket (result.order is an ORDER ticket, not position ticket)
+   Sleep(100); // Brief wait for position to register
+   ulong posTicket = FindPositionTicket(result.order);
+   if(posTicket == 0)
+   {
+      Print("WARNING: Could not find position ticket for order ", result.order, ". Using order ticket as fallback.");
+      posTicket = result.order;
+   }
+
+   // Get actual fill price from position
+   double fillPrice = price;
+   if(PositionSelectByTicket(posTicket))
+      fillPrice = PositionGetDouble(POSITION_PRICE_OPEN);
 
    // Track position
    int idx = ArraySize(g_positions);
    ArrayResize(g_positions, idx + 1);
 
-   g_positions[idx].ticket = result.order;
-   g_positions[idx].entryPrice = price;
+   g_positions[idx].ticket = posTicket;
+   g_positions[idx].entryPrice = fillPrice;
    g_positions[idx].initialSL = initialSL;
    g_positions[idx].initialTP = initialTP;
    g_positions[idx].currentSL = initialSL;
    g_positions[idx].currentTP = initialTP;
-   g_positions[idx].highWaterPrice = price;
-   g_positions[idx].lowWaterPrice = price;
+   g_positions[idx].highWaterPrice = fillPrice;
+   g_positions[idx].lowWaterPrice = fillPrice;
    g_positions[idx].inProfit = false;
+   g_positions[idx].tpExtensions = 0;  // FIX: Initialize extension counter
    g_positions[idx].openTime = TimeCurrent();
 
    string typeStr = (direction > 0) ? "BUY" : "SELL";
-   Print(typeStr, " @ ", DoubleToString(price, 5),
-         " | SL: ", DoubleToString(initialSL, 5),
-         " | TP: ", DoubleToString(initialTP, 5),
-         " | ATR_MULT: ", ATR_MULT);
+   Print(typeStr, " @ ", DoubleToString(fillPrice, g_digits),
+         " | SL: ", DoubleToString(initialSL, g_digits),
+         " | TP: ", DoubleToString(initialTP, g_digits),
+         " | ATR_MULT: ", ATR_MULT,
+         " | Ticket: ", posTicket);
 }
 
 //+------------------------------------------------------------------+
@@ -331,7 +491,6 @@ void ManagePositions()
       }
 
       // Check if in profit
-      bool wasInProfit = g_positions[i].inProfit;
       if(posType == POSITION_TYPE_BUY)
          g_positions[i].inProfit = (currentPrice > entry);
       else
@@ -341,12 +500,11 @@ void ManagePositions()
       if(ROLLING_SL && g_positions[i].inProfit)
       {
          double newSL = g_positions[i].currentSL;
-         double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
-         double trailDistance = INITIAL_SL_POINTS * point;
+         double trailDistance = INITIAL_SL_POINTS * g_point;
 
          if(posType == POSITION_TYPE_BUY)
          {
-            double proposedSL = g_positions[i].highWaterPrice - trailDistance;
+            double proposedSL = NormalizePrice(g_positions[i].highWaterPrice - trailDistance);
             if(proposedSL > g_positions[i].currentSL && proposedSL > entry)
             {
                newSL = proposedSL;
@@ -354,7 +512,7 @@ void ManagePositions()
          }
          else
          {
-            double proposedSL = g_positions[i].lowWaterPrice + trailDistance;
+            double proposedSL = NormalizePrice(g_positions[i].lowWaterPrice + trailDistance);
             if(proposedSL < g_positions[i].currentSL && proposedSL < entry)
             {
                newSL = proposedSL;
@@ -362,11 +520,13 @@ void ManagePositions()
          }
 
          // Update SL if changed
-         if(MathAbs(newSL - g_positions[i].currentSL) > point)
+         if(MathAbs(newSL - g_positions[i].currentSL) > g_point)
          {
-            ModifyPositionSL(ticket, newSL);
-            g_positions[i].currentSL = newSL;
-            Print("ROLLING SL: Moved to ", DoubleToString(newSL, 5));
+            if(ModifyPositionSL(ticket, newSL))
+            {
+               g_positions[i].currentSL = newSL;
+               Print("ROLLING SL: Moved to ", DoubleToString(newSL, g_digits));
+            }
          }
       }
 
@@ -374,26 +534,34 @@ void ManagePositions()
       if(USE_DYN_TP && g_positions[i].inProfit)
       {
          double tpDistance = MathAbs(g_positions[i].initialTP - entry);
+         if(tpDistance <= 0) continue;  // FIX: guard against division by zero
+
          double currentDistance = MathAbs(currentPrice - entry);
          double progress = currentDistance / tpDistance;
 
-         // If we've hit DYN_TP_PCT of our target, extend TP by DYN_TP_PCT
-         if(progress >= (DYN_TP_PCT / 100.0))
+         // FIX: Use extension counter to determine next trigger threshold
+         // Extension 0 triggers at 50%, extension 1 at 100%, extension 2 at 150%, etc.
+         double nextThreshold = (g_positions[i].tpExtensions + 1) * (DYN_TP_PCT / 100.0);
+
+         if(progress >= nextThreshold)
          {
             double extension = tpDistance * (DYN_TP_PCT / 100.0);
             double newTP;
 
             if(posType == POSITION_TYPE_BUY)
-               newTP = g_positions[i].currentTP + extension;
+               newTP = NormalizePrice(g_positions[i].currentTP + extension);
             else
-               newTP = g_positions[i].currentTP - extension;
+               newTP = NormalizePrice(g_positions[i].currentTP - extension);
 
-            double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
-            if(MathAbs(newTP - g_positions[i].currentTP) > point * 10)
+            if(MathAbs(newTP - g_positions[i].currentTP) > g_point * 10)
             {
-               ModifyPositionTP(ticket, newTP);
-               g_positions[i].currentTP = newTP;
-               Print("DYNAMIC TP: Extended to ", DoubleToString(newTP, 5));
+               if(ModifyPositionTP(ticket, newTP))
+               {
+                  g_positions[i].currentTP = newTP;
+                  g_positions[i].tpExtensions++;  // FIX: Increment to prevent repeat firing
+                  Print("DYNAMIC TP: Extended to ", DoubleToString(newTP, g_digits),
+                        " (extension #", g_positions[i].tpExtensions, ")");
+               }
             }
          }
       }
@@ -419,11 +587,17 @@ bool ModifyPositionSL(ulong ticket, double newSL)
    ZeroMemory(result);
 
    request.action = TRADE_ACTION_SLTP;
+   request.symbol = g_symbol;       // FIX: required field
    request.position = ticket;
-   request.sl = newSL;
+   request.sl = NormalizePrice(newSL);
    request.tp = PositionGetDouble(POSITION_TP);
 
-   return OrderSend(request, result) && result.retcode == TRADE_RETCODE_DONE;
+   if(!OrderSend(request, result) || (result.retcode != TRADE_RETCODE_DONE && result.retcode != TRADE_RETCODE_PLACED))
+   {
+      Print("ModifySL failed: ticket=", ticket, " retcode=", result.retcode, " ", result.comment);
+      return false;
+   }
+   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -439,11 +613,17 @@ bool ModifyPositionTP(ulong ticket, double newTP)
    ZeroMemory(result);
 
    request.action = TRADE_ACTION_SLTP;
+   request.symbol = g_symbol;       // FIX: required field
    request.position = ticket;
    request.sl = PositionGetDouble(POSITION_SL);
-   request.tp = newTP;
+   request.tp = NormalizePrice(newTP);
 
-   return OrderSend(request, result) && result.retcode == TRADE_RETCODE_DONE;
+   if(!OrderSend(request, result) || (result.retcode != TRADE_RETCODE_DONE && result.retcode != TRADE_RETCODE_PLACED))
+   {
+      Print("ModifyTP failed: ticket=", ticket, " retcode=", result.retcode, " ", result.comment);
+      return false;
+   }
+   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -454,26 +634,20 @@ void CheckLLMStatus()
    if(TimeCurrent() - g_lastLLMCheck < InpLLMCheckSecs) return;
    g_lastLLMCheck = TimeCurrent();
 
-   // Read LLM config file
    string filename = InpLLMConfigFile;
    int handle = FileOpen(filename, FILE_READ | FILE_TXT | FILE_COMMON);
 
    if(handle == INVALID_HANDLE)
-   {
-      // No config file - LLM not running, use defaults
       return;
-   }
 
    string content = "";
    while(!FileIsEnding(handle))
    {
-      content += FileReadString(handle);
+      content += FileReadString(handle) + " ";  // FIX: add separator between lines
    }
    FileClose(handle);
 
-   // Parse JSON-like content (simple parsing)
-   // Expected format: {"emergency_stop": false, "sl_adjust": 0, "tp_adjust": 0}
-
+   // Parse emergency_stop
    g_llmEmergencyStop = (StringFind(content, "\"emergency_stop\": true") >= 0 ||
                          StringFind(content, "\"emergency_stop\":true") >= 0);
 
@@ -481,7 +655,16 @@ void CheckLLMStatus()
    int slPos = StringFind(content, "\"sl_adjust\":");
    if(slPos >= 0)
    {
-      string slStr = StringSubstr(content, slPos + 13, 10);
+      string slStr = StringSubstr(content, slPos + 13, 20);
+      // Trim to just the numeric value
+      int commaPos = StringFind(slStr, ",");
+      int bracePos = StringFind(slStr, "}");
+      int endPos = StringLen(slStr);
+      if(commaPos >= 0 && commaPos < endPos) endPos = commaPos;
+      if(bracePos >= 0 && bracePos < endPos) endPos = bracePos;
+      slStr = StringSubstr(slStr, 0, endPos);
+      StringTrimLeft(slStr);
+      StringTrimRight(slStr);
       g_llmSLAdjust = StringToDouble(slStr);
    }
 
@@ -489,7 +672,15 @@ void CheckLLMStatus()
    int tpPos = StringFind(content, "\"tp_adjust\":");
    if(tpPos >= 0)
    {
-      string tpStr = StringSubstr(content, tpPos + 13, 10);
+      string tpStr = StringSubstr(content, tpPos + 13, 20);
+      int commaPos = StringFind(tpStr, ",");
+      int bracePos = StringFind(tpStr, "}");
+      int endPos = StringLen(tpStr);
+      if(commaPos >= 0 && commaPos < endPos) endPos = commaPos;
+      if(bracePos >= 0 && bracePos < endPos) endPos = bracePos;
+      tpStr = StringSubstr(tpStr, 0, endPos);
+      StringTrimLeft(tpStr);
+      StringTrimRight(tpStr);
       g_llmTPAdjust = StringToDouble(tpStr);
    }
 
@@ -511,20 +702,21 @@ void ApplyLLMAdjustments(int posIdx)
 
    double currentSL = PositionGetDouble(POSITION_SL);
    double currentTP = PositionGetDouble(POSITION_TP);
-   double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
 
    bool modified = false;
    double newSL = currentSL;
    double newTP = currentTP;
 
+   ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+
    // Apply SL adjustment (in points)
    if(g_llmSLAdjust != 0)
    {
-      ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       if(posType == POSITION_TYPE_BUY)
-         newSL = currentSL + (g_llmSLAdjust * point);
+         newSL = currentSL + (g_llmSLAdjust * g_point);
       else
-         newSL = currentSL - (g_llmSLAdjust * point);
+         newSL = currentSL - (g_llmSLAdjust * g_point);
+      newSL = NormalizePrice(newSL);
       modified = true;
       Print("LLM SL Adjust: ", g_llmSLAdjust, " points");
    }
@@ -532,11 +724,11 @@ void ApplyLLMAdjustments(int posIdx)
    // Apply TP adjustment (in points)
    if(g_llmTPAdjust != 0)
    {
-      ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       if(posType == POSITION_TYPE_BUY)
-         newTP = currentTP + (g_llmTPAdjust * point);
+         newTP = currentTP + (g_llmTPAdjust * g_point);
       else
-         newTP = currentTP - (g_llmTPAdjust * point);
+         newTP = currentTP - (g_llmTPAdjust * g_point);
+      newTP = NormalizePrice(newTP);
       modified = true;
       Print("LLM TP Adjust: ", g_llmTPAdjust, " points");
    }
@@ -549,14 +741,19 @@ void ApplyLLMAdjustments(int posIdx)
       ZeroMemory(result);
 
       request.action = TRADE_ACTION_SLTP;
+      request.symbol = g_symbol;       // FIX: required field
       request.position = ticket;
       request.sl = newSL;
       request.tp = newTP;
 
-      if(OrderSend(request, result) && result.retcode == TRADE_RETCODE_DONE)
+      if(OrderSend(request, result) && (result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_PLACED))
       {
          g_positions[posIdx].currentSL = newSL;
          g_positions[posIdx].currentTP = newTP;
+      }
+      else
+      {
+         Print("LLM adjustment failed: retcode=", result.retcode, " ", result.comment);
       }
    }
 
@@ -575,6 +772,7 @@ void CloseAllPositions(string reason)
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;  // FIX: guard against 0 ticket
       if(!PositionSelectByTicket(ticket)) continue;
       if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
       if(PositionGetString(POSITION_SYMBOL) != g_symbol) continue;
@@ -583,7 +781,11 @@ void CloseAllPositions(string reason)
       ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
 
       MqlTick tick;
-      SymbolInfoTick(g_symbol, tick);
+      if(!SymbolInfoTick(g_symbol, tick))  // FIX: check return value
+      {
+         Print("WARNING: Cannot get tick for ", g_symbol, " - skipping ticket ", ticket);
+         continue;
+      }
 
       MqlTradeRequest request;
       MqlTradeResult result;
@@ -609,7 +811,8 @@ void CloseAllPositions(string reason)
          request.price = tick.ask;
       }
 
-      OrderSend(request, result);
+      if(!OrderSend(request, result) || result.retcode != TRADE_RETCODE_DONE)
+         Print("Close failed: ticket=", ticket, " retcode=", result.retcode, " ", result.comment);
    }
 
    ArrayResize(g_positions, 0);
@@ -620,9 +823,12 @@ void CloseAllPositions(string reason)
 //+------------------------------------------------------------------+
 void RemovePosition(int index)
 {
-   for(int i = index; i < ArraySize(g_positions) - 1; i++)
+   int size = ArraySize(g_positions);
+   if(index < 0 || index >= size) return;  // FIX: bounds check
+
+   for(int i = index; i < size - 1; i++)
       g_positions[i] = g_positions[i + 1];
-   ArrayResize(g_positions, ArraySize(g_positions) - 1);
+   ArrayResize(g_positions, size - 1);
 }
 
 //+------------------------------------------------------------------+
@@ -633,6 +839,7 @@ bool HasOpenPosition()
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;  // FIX: guard against 0 ticket
       if(!PositionSelectByTicket(ticket)) continue;
       if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
       if(PositionGetString(POSITION_SYMBOL) != g_symbol) continue;

@@ -107,6 +107,12 @@ public:
    void           SetMaxPositions(int maxPos);
    void           SetDrawdownLimits(double dailyDD, double maxDD);
    void           SetRiskPercent(double riskPct);
+   void           SetATRMultipliers(double slMult, double tpMult);
+   void           SetPartialTPRatio(double ratio);
+   void           SetBreakEvenTrigger(double trigger);
+   void           SetTrailStartTrigger(double trigger);
+   void           SetCompressionBoost(int boost);
+   void           SetConfidenceThreshold(double threshold);
    void           Deinitialize(void);
 
    // Core Operations
@@ -170,7 +176,7 @@ CEntropyGridManager::CEntropyGridManager(void)
    m_lastGridPrice = 0;
 
    // Hard-coded per specification
-   m_confidenceThreshold = 0.80;
+   m_confidenceThreshold = 0.22;
    m_compressionBoost = 12;
    m_slAtrMultiplier = 1.5;
    m_tpAtrMultiplier = 3.0;
@@ -285,6 +291,55 @@ void CEntropyGridManager::SetDrawdownLimits(double dailyDD, double maxDD)
 void CEntropyGridManager::SetRiskPercent(double riskPct)
 {
    m_riskPerTradePct = riskPct;
+}
+
+//+------------------------------------------------------------------+
+//| Set ATR Multipliers (allows parent EA to override defaults)        |
+//+------------------------------------------------------------------+
+void CEntropyGridManager::SetATRMultipliers(double slMult, double tpMult)
+{
+   m_slAtrMultiplier = slMult;
+   m_tpAtrMultiplier = tpMult;
+}
+
+//+------------------------------------------------------------------+
+//| Set Partial TP Ratio                                               |
+//+------------------------------------------------------------------+
+void CEntropyGridManager::SetPartialTPRatio(double ratio)
+{
+   m_partialTpRatio = ratio;
+}
+
+//+------------------------------------------------------------------+
+//| Set Break Even Trigger                                             |
+//+------------------------------------------------------------------+
+void CEntropyGridManager::SetBreakEvenTrigger(double trigger)
+{
+   m_breakEvenTrigger = trigger;
+}
+
+//+------------------------------------------------------------------+
+//| Set Trail Start Trigger                                            |
+//+------------------------------------------------------------------+
+void CEntropyGridManager::SetTrailStartTrigger(double trigger)
+{
+   m_trailStartTrigger = trigger;
+}
+
+//+------------------------------------------------------------------+
+//| Set Compression Boost                                              |
+//+------------------------------------------------------------------+
+void CEntropyGridManager::SetCompressionBoost(int boost)
+{
+   m_compressionBoost = boost;
+}
+
+//+------------------------------------------------------------------+
+//| Set Confidence Threshold                                           |
+//+------------------------------------------------------------------+
+void CEntropyGridManager::SetConfidenceThreshold(double threshold)
+{
+   m_confidenceThreshold = threshold;
 }
 
 //+------------------------------------------------------------------+

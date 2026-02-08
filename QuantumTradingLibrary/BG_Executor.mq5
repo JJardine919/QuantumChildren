@@ -10,7 +10,7 @@
 //--- Input parameters
 input string SignalFile = "etare_signals.json";      // Signal file from Python
 input int    MagicNumber = 365060;                   // Blue Guardian Magic
-input double LotSize = 2.5;                          // Fixed Lot Size
+input double LotSize = 0.03;                         // Fixed Lot Size
 input int    Slippage = 50;                          // Max slippage
 input bool   TradeEnabled = true;                    // ENABLED FOR LIVE TRADING
 
@@ -37,10 +37,96 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnTick()
 {
+    // ALWAYS manage virtual SL/TP on every tick
+    ManageVirtualSLTP();
+
     if(TimeCurrent() - lastSignalCheck < checkInterval) return;
     lastSignalCheck = TimeCurrent();
 
     ReadAndExecuteSignals();
+}
+
+//+------------------------------------------------------------------+
+//| Manage virtual (hidden) SL/TP                                    |
+//+------------------------------------------------------------------+
+void ManageVirtualSLTP()
+{
+    if(!g_virtualPos.active) return;
+
+    // Check if position still exists
+    if(!PositionSelectByTicket(g_virtualPos.ticket))
+    {
+        // Try to find by magic
+        bool found = false;
+        for(int i = PositionsTotal() - 1; i >= 0; i--)
+        {
+            ulong ticket = PositionGetTicket(i);
+            if(PositionSelectByTicket(ticket))
+            {
+                if(PositionGetInteger(POSITION_MAGIC) == MagicNumber &&
+                   PositionGetString(POSITION_SYMBOL) == _Symbol)
+                {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if(!found)
+        {
+            g_virtualPos.active = false;
+            return;
+        }
+    }
+
+    double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+    ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+    double volume = PositionGetDouble(POSITION_VOLUME);
+    ulong ticket = PositionGetInteger(POSITION_TICKET);
+
+    bool hitSL = false;
+    bool hitTP = false;
+
+    if(posType == POSITION_TYPE_BUY)
+    {
+        hitSL = (currentPrice <= g_virtualPos.virtualSL);
+        hitTP = (currentPrice >= g_virtualPos.virtualTP);
+    }
+    else
+    {
+        hitSL = (currentPrice >= g_virtualPos.virtualSL);
+        hitTP = (currentPrice <= g_virtualPos.virtualTP);
+    }
+
+    if(hitSL || hitTP)
+    {
+        Print(hitSL ? "HIDDEN SL HIT" : "HIDDEN TP HIT", " - Closing position at ", currentPrice);
+
+        MqlTradeRequest request;
+        MqlTradeResult result;
+        ZeroMemory(request);
+        ZeroMemory(result);
+
+        request.action = TRADE_ACTION_DEAL;
+        request.position = ticket;
+        request.symbol = _Symbol;
+        request.volume = volume;
+        request.type = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+        request.price = (posType == POSITION_TYPE_BUY) ?
+                        SymbolInfoDouble(_Symbol, SYMBOL_BID) :
+                        SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+        request.deviation = Slippage;
+        request.magic = MagicNumber;
+        request.type_filling = ORDER_FILLING_IOC;
+
+        if(OrderSend(request, result))
+        {
+            if(result.retcode == TRADE_RETCODE_DONE)
+            {
+                Print("Position closed successfully");
+                g_virtualPos.active = false;
+            }
+        }
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -85,6 +171,17 @@ void ReadAndExecuteSignals()
 //+------------------------------------------------------------------+
 //| Execute Trade                                                    |
 //+------------------------------------------------------------------+
+//--- Virtual position tracking for hidden SL/TP
+struct VirtualPosition
+{
+   ulong  ticket;
+   double entryPrice;
+   double virtualSL;
+   double virtualTP;
+   bool   active;
+};
+VirtualPosition g_virtualPos;
+
 void ExecuteTrade(ENUM_ORDER_TYPE type)
 {
     // Check if position already exists for this magic
@@ -96,11 +193,25 @@ void ExecuteTrade(ENUM_ORDER_TYPE type)
     ZeroMemory(result);
 
     double price = (type == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-    
-    // SL/TP (BTC Scale) - Hardcoded Safety
-    double sl_dist = 500.0; // $500 move
-    double tp_dist = 1500.0; // $1500 move
-    
+
+    // Dollar-based SL calculation: $1.00 max loss
+    double MAX_LOSS_DOLLARS = 1.00;
+    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+    double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+
+    double sl_dist = 0;
+    if(tickValue > 0 && LotSize > 0)
+    {
+        sl_dist = (MAX_LOSS_DOLLARS / (tickValue * LotSize)) * tickSize;
+    }
+
+    // Fallback if calculation fails
+    if(sl_dist <= 0) sl_dist = 500.0 * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+
+    // TP = SL * 3 (3:1 R:R)
+    double tp_dist = sl_dist * 3.0;
+
+    // Calculate virtual SL/TP levels (hidden from broker)
     double sl = (type == ORDER_TYPE_BUY) ? price - sl_dist : price + sl_dist;
     double tp = (type == ORDER_TYPE_BUY) ? price + tp_dist : price - tp_dist;
 
@@ -109,8 +220,8 @@ void ExecuteTrade(ENUM_ORDER_TYPE type)
     request.volume = LotSize;
     request.type = type;
     request.price = price;
-    request.sl = NormalizeDouble(sl, _Digits);
-    request.tp = NormalizeDouble(tp, _Digits);
+    request.sl = 0;  // HIDDEN - managed internally
+    request.tp = 0;  // HIDDEN - managed internally
     request.deviation = Slippage;
     request.magic = MagicNumber;
     request.comment = "BG_Redux";
@@ -123,7 +234,24 @@ void ExecuteTrade(ENUM_ORDER_TYPE type)
     }
     else
     {
-        Print("SUCCESS: ", (type==ORDER_TYPE_BUY ? "BUY" : "SELL"), " executed.");
+        if(result.retcode == TRADE_RETCODE_DONE)
+        {
+            // Store virtual SL/TP for internal management
+            g_virtualPos.ticket = result.order;
+            g_virtualPos.entryPrice = price;
+            g_virtualPos.virtualSL = sl;
+            g_virtualPos.virtualTP = tp;
+            g_virtualPos.active = true;
+
+            Print("SUCCESS: ", (type==ORDER_TYPE_BUY ? "BUY" : "SELL"), " executed.");
+            Print("  Hidden SL: ", DoubleToString(sl, _Digits), " | Hidden TP: ", DoubleToString(tp, _Digits));
+            Print("  SL dist: ", DoubleToString(sl_dist, 2), " | TP dist: ", DoubleToString(tp_dist, 2));
+            Print("  Max loss: $", DoubleToString(MAX_LOSS_DOLLARS, 2));
+        }
+        else
+        {
+            Print("Order rejected: ", result.comment);
+        }
     }
 }
 

@@ -882,23 +882,10 @@ bool CGridManager::ClosePosition(ulong ticket, double volume)
 //+------------------------------------------------------------------+
 bool CGridManager::ModifyPosition(ulong ticket, double sl, double tp)
 {
-   MqlTradeRequest request;
-   MqlTradeResult result;
-   ZeroMemory(request);
-   ZeroMemory(result);
-
-   request.action = TRADE_ACTION_SLTP;
-   request.position = ticket;
-   request.sl = sl;
-   request.tp = tp;
-
-   if(!OrderSend(request, result))
-   {
-      Print("Modify position failed: ", GetLastError());
-      return false;
-   }
-
-   return (result.retcode == TRADE_RETCODE_DONE);
+   // Virtual SL/TP management only - NOT sent to broker
+   // All SL/TP is managed internally via virtual tracking in grid position struct
+   // This function exists for interface compatibility only
+   return PositionSelectByTicket(ticket);
 }
 
 //+------------------------------------------------------------------+

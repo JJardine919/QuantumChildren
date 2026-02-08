@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "QuantumChildren"
 #property version   "1.00"
-#property strict
+
 
 //+------------------------------------------------------------------+
 //| Input Parameters                                                  |
@@ -15,14 +15,13 @@ input int      InpMagicNumber     = 365001;        // Magic Number
 input double   InpVolume          = 0.01;          // Lot Size
 input double   InpRiskPercent     = 0.5;           // Risk % per trade
 
-input group "=== ATR Settings (HARD-CODED from +12 Expert) ==="
-// These are locked - matching the 89% win rate configuration
-const double   SL_ATR_MULT        = 1.5;           // Stop Loss = 1.5x ATR
-const double   TP_ATR_MULT        = 3.0;           // Take Profit = 3.0x ATR
-const double   COMPRESSION_BOOST  = 12.0;          // +12 Confidence Boost
-const double   PARTIAL_TP_RATIO   = 0.5;           // 50% partial take profit
-const double   BE_TRIGGER_PCT     = 0.30;          // Break-even at 30% of TP
-const double   TRAIL_TRIGGER_PCT  = 0.50;          // Trail start at 50% of TP
+input group "=== ATR Settings ==="
+input double   SL_ATR_MULT        = 1.5;           // Stop Loss ATR Multiplier
+input double   TP_ATR_MULT        = 3.0;           // Take Profit ATR Multiplier
+input double   COMPRESSION_BOOST  = 12.0;          // Confidence Boost
+input double   PARTIAL_TP_RATIO   = 0.5;           // Partial Take Profit Ratio (50%)
+input double   BE_TRIGGER_PCT     = 0.30;          // Break-even Trigger (% of TP)
+input double   TRAIL_TRIGGER_PCT  = 0.50;          // Trail Start (% of TP)
 
 input group "=== Entry Filter Settings ==="
 input int      InpATRPeriod       = 14;            // ATR Period
@@ -30,11 +29,17 @@ input int      InpEMAFast         = 8;             // Fast EMA
 input int      InpEMASlow         = 21;            // Slow EMA
 input int      InpEMA200          = 200;           // Trend EMA
 input int      InpRSIPeriod       = 14;            // RSI Period
-input double   InpConfidenceThresh = 0.80;         // Base Confidence Threshold
+input double   InpConfidenceThresh = 0.22;         // Base Confidence Threshold
 
 input group "=== Risk Management ==="
 input double   InpDailyDDLimit    = 4.5;           // Daily DD Limit %
 input double   InpMaxDDLimit      = 9.0;           // Max DD Limit %
+
+input group "=== 12% ENTROPY REMOVAL (Logarithmic) ==="
+input bool     InpUseEntropyRemoval = true;        // Enable 12% Entropy Removal
+input int      InpEntropyLookback   = 50;          // Price lookback for entropy calc
+input double   InpEntropyRemovalPct = 0.12;        // Entropy removal factor (12%)
+input double   InpEntropyBlockLevel = 2.20;        // Block trades above this entropy
 
 //+------------------------------------------------------------------+
 //| Global Variables                                                  |
@@ -111,6 +116,15 @@ int OnInit()
    Print("Simulated Win Rate: 89.17%");
    Print("SL: ", SL_ATR_MULT, "x ATR | TP: ", TP_ATR_MULT, "x ATR");
    Print("Compression Boost: +", COMPRESSION_BOOST);
+   Print("----------------------------------------");
+   Print("12% ENTROPY REMOVAL (Logarithmic): ", InpUseEntropyRemoval ? "ENABLED" : "DISABLED");
+   if(InpUseEntropyRemoval)
+   {
+      Print("  Lookback: ", InpEntropyLookback, " bars");
+      Print("  Removal Factor: ", InpEntropyRemovalPct * 100, "%");
+      Print("  Block Level: ", InpEntropyBlockLevel);
+      Print("  Method: Shannon H = -SUM(p * log2(p))");
+   }
    Print("========================================");
 
    return INIT_SUCCEEDED;
@@ -161,14 +175,22 @@ void OnTick()
    // Check if we already have a position
    if(HasOpenPosition()) return;
 
+   // === 12% ENTROPY REMOVAL: Block if market is too chaotic ===
+   if(IsEntropyBlocked()) return;
+
    // Calculate confidence (with +12 boost)
    double confidence = CalculateConfidence();
+
+   // === 12% ENTROPY REMOVAL: Scale confidence by entropy factor ===
+   double entropyFactor = GetEntropyRemovalFactor();
+   double adjustedConfidence = confidence * entropyFactor;
+
    double adjustedThreshold = InpConfidenceThresh - (COMPRESSION_BOOST / 100.0);
    adjustedThreshold = MathMax(adjustedThreshold, 0.50);
 
-   if(confidence < adjustedThreshold)
+   if(adjustedConfidence < adjustedThreshold)
    {
-      // Low confidence - skip
+      // Low confidence (after entropy removal) - skip
       return;
    }
 
@@ -178,6 +200,112 @@ void OnTick()
 
    // Execute trade
    ExecuteTrade(signal);
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Shannon Entropy from Price Returns (Logarithmic)        |
+//| Uses MathLog(p)/MathLog(2) -- identical to XAUUSD_GridCore        |
+//| Returns normalized entropy [0..~2.32] for 5 bins                  |
+//+------------------------------------------------------------------+
+double CalculateShannonEntropy()
+{
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+
+   int copied = CopyRates(_Symbol, PERIOD_M5, 0, InpEntropyLookback + 1, rates);
+   if(copied < InpEntropyLookback + 1)
+      return 99.0; // Cannot calculate -- return high entropy (safe: blocks trade)
+
+   // Calculate percentage returns
+   double changes[];
+   ArrayResize(changes, copied - 1);
+
+   for(int i = 0; i < copied - 1; i++)
+   {
+      if(rates[i+1].close == 0) continue;
+      changes[i] = (rates[i].close - rates[i+1].close) / rates[i+1].close;
+   }
+
+   // Bin the changes into 5 categories (matching XAUUSD_GridCore pattern)
+   int bins[5] = {0, 0, 0, 0, 0}; // Strong down, down, flat, up, strong up
+
+   for(int i = 0; i < ArraySize(changes); i++)
+   {
+      if(changes[i] < -0.002)       bins[0]++;
+      else if(changes[i] < -0.0005) bins[1]++;
+      else if(changes[i] < 0.0005)  bins[2]++;
+      else if(changes[i] < 0.002)   bins[3]++;
+      else                           bins[4]++;
+   }
+
+   // Shannon entropy: H = -SUM(p * log2(p))
+   double entropy = 0;
+   int total = ArraySize(changes);
+   if(total == 0) return 99.0;
+
+   for(int i = 0; i < 5; i++)
+   {
+      if(bins[i] > 0)
+      {
+         double p = (double)bins[i] / total;
+         entropy -= p * MathLog(p) / MathLog(2.0);
+      }
+   }
+
+   return entropy; // Max ~2.32 for 5 bins (uniform distribution)
+}
+
+//+------------------------------------------------------------------+
+//| Apply 12% Entropy Removal Factor                                  |
+//| Returns scaling factor [0.0 .. 1.0] for confidence                |
+//| At zero entropy: returns 1.0 (no reduction)                       |
+//| At max entropy (2.32): returns 1.0 - (1.0 * 0.12) = 0.88         |
+//+------------------------------------------------------------------+
+double GetEntropyRemovalFactor()
+{
+   if(!InpUseEntropyRemoval)
+      return 1.0; // Feature disabled -- no modification
+
+   double entropy = CalculateShannonEntropy();
+   double maxEntropy = MathLog(5.0) / MathLog(2.0); // ~2.322 for 5 bins
+
+   // Normalize to [0..1]
+   double normalizedEntropy = MathMin(1.0, entropy / maxEntropy);
+
+   // Apply 12% removal: factor = 1.0 - (normalized * removal_pct)
+   double factor = 1.0 - (normalizedEntropy * InpEntropyRemovalPct);
+   factor = MathMax(0.0, MathMin(1.0, factor));
+
+   // Log for transparency
+   static datetime lastEntropyLog = 0;
+   if(TimeCurrent() - lastEntropyLog > 300) // Every 5 min
+   {
+      Print("[ENTROPY_REMOVAL] Shannon H=", DoubleToString(entropy, 4),
+            " | Normalized=", DoubleToString(normalizedEntropy, 4),
+            " | Factor=", DoubleToString(factor, 4),
+            " | Block=", (entropy >= InpEntropyBlockLevel ? "YES" : "NO"));
+      lastEntropyLog = TimeCurrent();
+   }
+
+   return factor;
+}
+
+//+------------------------------------------------------------------+
+//| Check if entropy is too high to trade                             |
+//+------------------------------------------------------------------+
+bool IsEntropyBlocked()
+{
+   if(!InpUseEntropyRemoval)
+      return false;
+
+   double entropy = CalculateShannonEntropy();
+   if(entropy >= InpEntropyBlockLevel)
+   {
+      Print("[ENTROPY_REMOVAL] BLOCKED: Shannon entropy ", DoubleToString(entropy, 4),
+            " >= threshold ", DoubleToString(InpEntropyBlockLevel, 4));
+      return true;
+   }
+   return false;
 }
 
 //+------------------------------------------------------------------+

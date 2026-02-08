@@ -20,6 +20,10 @@ import json
 import time
 from pathlib import Path
 
+# Add parent directory for credential_manager
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from credential_manager import get_credentials, CredentialError
+
 # Local paths
 LOCAL_BASE = Path(__file__).parent
 CONFIG_FILE = LOCAL_BASE / "accounts_config.json"

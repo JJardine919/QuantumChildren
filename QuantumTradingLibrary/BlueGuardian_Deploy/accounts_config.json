@@ -1,9 +1,11 @@
 {
+  "_note": "PASSWORDS ARE STORED IN .env FILE - Use credential_manager to load them",
+  "_credential_keys": "BG_INSTANT, BG_CHALLENGE, ATLAS, GL_1, GL_2, GL_3",
   "accounts": [
     {
       "name": "BG_COMPETITION",
       "account_id": "366592",
-      "password": "CHECK_BG_DASHBOARD",
+      "credential_key": "BG_INSTANT",
       "server": "BlueGuardian-Server",
       "type": "competition",
       "magic_number": 366592,
@@ -38,7 +40,7 @@
     {
       "name": "BG_5K_INSTANT",
       "account_id": "366604",
-      "password": "YF^oHH&4Nm",
+      "credential_key": "BG_INSTANT",
       "server": "BlueGuardian-Server",
       "type": "instant_challenge",
       "magic_number": 366001,
@@ -75,7 +77,7 @@
     {
       "name": "BG_100K_CHALLENGE",
       "account_id": "365060",
-      "password": ")8xaE(gAuU",
+      "credential_key": "BG_CHALLENGE",
       "server": "BlueGuardian-Server",
       "type": "challenge",
       "magic_number": 365001,
@@ -112,7 +114,7 @@
     {
       "name": "ATLAS_300K_GRID",
       "account_id": "212000584",
-      "password": "M6NLk79MN@",
+      "credential_key": "ATLAS",
       "server": "AtlasFunded-Server",
       "type": "challenge",
       "magic_number": 212001,
@@ -150,7 +152,7 @@
   "vps": {
     "host": "NAMECHEAP_VPS_IP",
     "user": "root",
-    "password": "NAMECHEAP_VPS_PASSWORD",
+    "_note": "VPS password should be stored in environment variable VPS_PASSWORD",
     "remote_base": "/opt/blueguardian"
   },
   "trading": {

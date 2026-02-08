@@ -10,9 +10,15 @@ import requests
 import json
 import time
 import logging
+import sys
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, List
+from pathlib import Path
+
+# Add parent directory for credential_manager
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from credential_manager import get_credentials, CredentialError
 
 # Configure logging
 logging.basicConfig(
@@ -46,12 +52,23 @@ OLLAMA_MODEL = "mistral"  # or "llama2", "codellama", etc.
 # Symbols to monitor
 SYMBOLS = ["XAUUSD", "BTCUSD", "ETHUSD"]
 
-# GetLeveraged accounts
-ACCOUNTS = [
-    {"login": 113328, "password": "H*M5c7jpR7", "server": "GetLeveraged-Trade"},
-    {"login": 113326, "password": "%bwN)IvJ5F", "server": "GetLeveraged-Trade"},
-    {"login": 107245, "password": "$86eCmFbXR", "server": "GetLeveraged-Trade"},
-]
+# GetLeveraged accounts - loaded from credential_manager
+def load_accounts():
+    """Load account credentials from credential_manager"""
+    accounts = []
+    for key in ['GL_2', 'GL_1', 'GL_3']:
+        try:
+            creds = get_credentials(key)
+            accounts.append({
+                "login": creds['account'],
+                "password": creds['password'],
+                "server": creds['server']
+            })
+        except CredentialError as e:
+            logger.warning(f"Could not load credentials for {key}: {e}")
+    return accounts
+
+ACCOUNTS = load_accounts()
 
 # =============================================================================
 # DATA STRUCTURES

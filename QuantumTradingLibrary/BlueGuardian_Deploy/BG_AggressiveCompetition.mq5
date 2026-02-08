@@ -1,14 +1,14 @@
 //+------------------------------------------------------------------+
 //|                                    BG_AggressiveCompetition.mq5  |
 //|                    COMPETITION ONLY - NOT REAL MONEY             |
-//|                    AGGRESSIVE GRID TRADING - NO RISK LIMITS      |
+//|                    AGGRESSIVE GRID TRADING                       |
 //+------------------------------------------------------------------+
 #property copyright "Quantum Trading Library"
 #property link      "https://quantumtradinglib.com"
-#property version   "1.00"
+#property version   "2.00"
 #property strict
 #property description "AGGRESSIVE Competition Grid Trader"
-#property description "NO drawdown limits - MAXIMUM position size"
+#property description "Dynamic ATR SL/TP + Rolling SL + 50% Dynamic TP"
 #property description "For competition accounts ONLY"
 
 //+------------------------------------------------------------------+
@@ -18,30 +18,40 @@ input group "=== ACCOUNT SETTINGS ==="
 input string   AccountName       = "BG_COMPETITION";   // Account Name
 input int      MagicNumber       = 366592;             // Magic Number (account ID)
 
-input group "=== AGGRESSIVE TRADING SETTINGS ==="
-input double   LotSize           = 0.50;               // Lot Size (AGGRESSIVE)
-input int      MaxPositions      = 20;                 // Max Grid Positions (HIGH)
-input int      GridSpacingPts    = 200;                // Grid Spacing (points) - TIGHT
-input int      TakeProfitPts     = 300;                // Take Profit (points) - QUICK
+input group "=== TRADING SETTINGS ==="
+input double   LotSize           = 0.03;               // Lot Size
+input int      MaxPositions      = 20;                 // Max Grid Positions
+input int      GridSpacingPts    = 200;                // Grid Spacing (points)
 input bool     BothDirections    = true;               // Trade BOTH directions
-input int      CheckSeconds      = 5;                  // Check Interval (FAST)
+input int      CheckSeconds      = 5;                  // Check Interval
+
+input group "=== RISK MANAGEMENT (ATR-BASED) ==="
+input double   InpTPMultiplier   = 3.0;                // TP Multiplier (TP = SL x this)
+input double   InpDynTPPercent   = 50.0;               // Dynamic TP % (partial close)
+input double   InpRollingSLMult  = 1.5;                // Rolling SL Multiplier
 
 input group "=== SIGNAL SETTINGS ==="
-input int      FastEMA           = 5;                  // Fast EMA (responsive)
-input int      SlowEMA           = 13;                 // Slow EMA (responsive)
-input double   MinConfidence     = 0.3;                // Min Confidence (LOW - more trades)
+input int      FastEMA           = 5;                  // Fast EMA
+input int      SlowEMA           = 13;                 // Slow EMA
+input double   MinConfidence     = 0.3;                // Min Confidence
 
-input group "=== COMPETITION MODE - NO LIMITS ==="
+input group "=== COMPETITION MODE ==="
 input bool     IgnoreDrawdown    = true;               // Ignore Drawdown Limits
 input bool     ScaleOnWins       = true;               // Increase lots on wins
 input double   WinScaleFactor    = 1.2;                // Scale factor on wins
+
+//+------------------------------------------------------------------+
+//| CONSTANTS (HARDCODED - DO NOT MAKE INPUT)                         |
+//+------------------------------------------------------------------+
+#define SL_ATR_MULTIPLIER  1.0    // SL = ATR x 1.0 (HARDCODED)
+#define ATR_PERIOD         14     // ATR period
 
 //+------------------------------------------------------------------+
 //| GLOBAL VARIABLES                                                   |
 //+------------------------------------------------------------------+
 int g_handleEmaFast = INVALID_HANDLE;
 int g_handleEmaSlow = INVALID_HANDLE;
-int g_handleAtr = INVALID_HANDLE;
+int g_handleAtr     = INVALID_HANDLE;
 
 double g_emaFast[];
 double g_emaSlow[];
@@ -51,13 +61,17 @@ datetime g_lastCheck = 0;
 double g_currentLot = 0;
 int g_winStreak = 0;
 
-// Position tracking for hidden TP management
+// Position tracking
 struct GridLevel
 {
    ulong  ticket;
    double entry;
-   double hiddenTP;
-   int    direction; // 1=BUY, -1=SELL
+   double sl;
+   double tp;
+   double dynTPPrice;     // 50% partial TP level
+   bool   dynTPTaken;     // Has partial TP fired?
+   double rollingSL;      // Current rolling SL level
+   int    direction;      // 1=BUY, -1=SELL
    int    level;
 };
 GridLevel g_grid[];
@@ -69,23 +83,21 @@ int g_gridCount = 0;
 int OnInit()
 {
    Print("================================================");
-   Print("  AGGRESSIVE COMPETITION GRID EA v1.0");
+   Print("  AGGRESSIVE COMPETITION GRID EA v2.0");
    Print("  *** FOR COMPETITION USE ONLY ***");
    Print("================================================");
    Print("  Account: ", AccountName);
    Print("  Magic: ", MagicNumber);
-   Print("  Lot Size: ", LotSize, " (AGGRESSIVE)");
-   Print("  Max Positions: ", MaxPositions);
-   Print("  Grid Spacing: ", GridSpacingPts, " pts (TIGHT)");
-   Print("  TP: ", TakeProfitPts, " pts (QUICK)");
-   Print("  Both Directions: ", BothDirections ? "YES" : "NO");
-   Print("  Ignore DD Limits: ", IgnoreDrawdown ? "YES" : "NO");
+   Print("  Lot: ", LotSize);
+   Print("  SL: ATR x ", DoubleToString(SL_ATR_MULTIPLIER, 1), " (hardcoded)");
+   Print("  TP: SL x ", DoubleToString(InpTPMultiplier, 1), " (param)");
+   Print("  Dynamic TP: ", DoubleToString(InpDynTPPercent, 0), "% partial close");
+   Print("  Rolling SL: ", DoubleToString(InpRollingSLMult, 1), "x");
    Print("================================================");
 
-   // Create EMA indicators on M1
    g_handleEmaFast = iMA(_Symbol, PERIOD_M1, FastEMA, 0, MODE_EMA, PRICE_CLOSE);
    g_handleEmaSlow = iMA(_Symbol, PERIOD_M1, SlowEMA, 0, MODE_EMA, PRICE_CLOSE);
-   g_handleAtr = iATR(_Symbol, PERIOD_M1, 14);
+   g_handleAtr     = iATR(_Symbol, PERIOD_M1, ATR_PERIOD);
 
    if(g_handleEmaFast == INVALID_HANDLE || g_handleEmaSlow == INVALID_HANDLE || g_handleAtr == INVALID_HANDLE)
    {
@@ -100,12 +112,10 @@ int OnInit()
    g_currentLot = LotSize;
    g_lastCheck = 0;
 
-   // Sync existing positions
    SyncGrid();
 
    Print("Balance: $", DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2));
    Print("Synced ", g_gridCount, " existing positions");
-   Print(">>> AGGRESSIVE MODE ACTIVE <<<");
    Print("================================================");
 
    return INIT_SUCCEEDED;
@@ -127,17 +137,11 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // ALWAYS manage positions on every tick (for hidden TP)
    ManageGrid();
 
-   // FAST check interval for competition
    if(TimeCurrent() - g_lastCheck < CheckSeconds) return;
    g_lastCheck = TimeCurrent();
 
-   // NO risk checks in competition mode
-   // Just trade aggressively
-
-   // Check for entry signals
    CheckEntry();
 }
 
@@ -146,64 +150,45 @@ void OnTick()
 //+------------------------------------------------------------------+
 void CheckEntry()
 {
-   // Count positions by direction
    int buyCount = 0, sellCount = 0;
    CountPositionsByDirection(buyCount, sellCount);
 
    int totalPos = buyCount + sellCount;
    if(totalPos >= MaxPositions) return;
 
-   // Get indicator values
    if(CopyBuffer(g_handleEmaFast, 0, 0, 3, g_emaFast) < 3) return;
    if(CopyBuffer(g_handleEmaSlow, 0, 0, 3, g_emaSlow) < 3) return;
    if(CopyBuffer(g_handleAtr, 0, 0, 3, g_atr) < 3) return;
 
    double emaF = g_emaFast[1];
    double emaS = g_emaSlow[1];
-   double atr = g_atr[1];
+   double atr  = g_atr[1];
 
-   // Current tick
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol, tick)) return;
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
 
-   // Signal detection
-   bool buySignal = (emaF > emaS);
+   bool buySignal  = (emaF > emaS);
    bool sellSignal = (emaF < emaS);
 
-   // Calculate confidence based on EMA separation
    double separation = MathAbs(emaF - emaS);
    double confidence = MathMin(1.0, (separation / atr) * 0.5);
-
-   // Lower threshold for more trades in competition
    if(confidence < MinConfidence) return;
 
-   // Grid spacing check for BUY positions
    if(buySignal && buyCount < MaxPositions / 2)
    {
       double lastBuyEntry = GetLastEntryPrice(1);
       double spacing = GridSpacingPts * point;
-
-      bool shouldOpenBuy = (buyCount == 0) || (tick.ask < lastBuyEntry - spacing);
-
-      if(shouldOpenBuy)
-      {
+      if((buyCount == 0) || (tick.ask < lastBuyEntry - spacing))
          OpenPosition(ORDER_TYPE_BUY, buyCount + 1);
-      }
    }
 
-   // Grid spacing check for SELL positions (if bi-directional)
    if(BothDirections && sellSignal && sellCount < MaxPositions / 2)
    {
       double lastSellEntry = GetLastEntryPrice(-1);
       double spacing = GridSpacingPts * point;
-
-      bool shouldOpenSell = (sellCount == 0) || (tick.bid > lastSellEntry + spacing);
-
-      if(shouldOpenSell)
-      {
+      if((sellCount == 0) || (tick.bid > lastSellEntry + spacing))
          OpenPosition(ORDER_TYPE_SELL, sellCount + 1);
-      }
    }
 }
 
@@ -216,41 +201,59 @@ void OpenPosition(ENUM_ORDER_TYPE type, int level)
    if(!SymbolInfoTick(_Symbol, tick)) return;
 
    double price = (type == ORDER_TYPE_BUY) ? tick.ask : tick.bid;
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
 
-   // Calculate lot (scale on wins if enabled)
-   double lot = g_currentLot;
-   lot = NormalizeLot(lot);
+   double lot = NormalizeLot(g_currentLot);
 
-   // Calculate hidden TP
-   double hiddenTP;
+   // Get ATR
+   if(CopyBuffer(g_handleAtr, 0, 0, 3, g_atr) < 3) return;
+   double atr = g_atr[1];
+
+   // SL = ATR x 1.0 (hardcoded multiplier)
+   double slDistance = atr * SL_ATR_MULTIPLIER;
+
+   // TP = SL_distance x TP_Multiplier (input parameter)
+   double tpDistance = slDistance * InpTPMultiplier;
+
+   // Dynamic TP = 50% of full TP distance
+   double dynTPDistance = tpDistance * (InpDynTPPercent / 100.0);
+
+   double sl, tp, dynTP;
    if(type == ORDER_TYPE_BUY)
    {
-      hiddenTP = price + (TakeProfitPts * point);
+      sl    = price - slDistance;
+      tp    = price + tpDistance;
+      dynTP = price + dynTPDistance;
    }
    else
    {
-      hiddenTP = price - (TakeProfitPts * point);
+      sl    = price + slDistance;
+      tp    = price - tpDistance;
+      dynTP = price - dynTPDistance;
    }
 
-   // Build request - NO SL, only TP (hidden)
+   // Normalize to tick size
+   double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   sl    = MathRound(sl / tickSize) * tickSize;
+   tp    = MathRound(tp / tickSize) * tickSize;
+   dynTP = MathRound(dynTP / tickSize) * tickSize;
+
    MqlTradeRequest request;
    MqlTradeResult result;
    ZeroMemory(request);
    ZeroMemory(result);
 
-   request.action = TRADE_ACTION_DEAL;
-   request.symbol = _Symbol;
-   request.volume = lot;
-   request.type = type;
-   request.price = price;
-   request.deviation = 50;  // Wide slippage for competition
-   request.magic = MagicNumber;
-   request.comment = StringFormat("COMP_L%d", level);
-   request.type_time = ORDER_TIME_GTC;
+   request.action       = TRADE_ACTION_DEAL;
+   request.symbol       = _Symbol;
+   request.volume       = lot;
+   request.type         = type;
+   request.price        = price;
+   request.deviation    = 50;
+   request.magic        = MagicNumber;
+   request.comment      = StringFormat("COMP_L%d", level);
+   request.type_time    = ORDER_TIME_GTC;
    request.type_filling = GetFilling();
-   request.sl = 0;  // NO stop loss in competition
-   request.tp = 0;  // Hidden TP
+   request.sl           = sl;
+   request.tp           = tp;
 
    if(!OrderSend(request, result))
    {
@@ -260,21 +263,27 @@ void OpenPosition(ENUM_ORDER_TYPE type, int level)
 
    if(result.retcode == TRADE_RETCODE_DONE)
    {
-      // Track position
       int idx = ArraySize(g_grid);
       ArrayResize(g_grid, idx + 1);
 
-      g_grid[idx].ticket = result.order;
-      g_grid[idx].entry = price;
-      g_grid[idx].hiddenTP = hiddenTP;
-      g_grid[idx].direction = (type == ORDER_TYPE_BUY) ? 1 : -1;
-      g_grid[idx].level = level;
+      g_grid[idx].ticket     = result.order;
+      g_grid[idx].entry      = price;
+      g_grid[idx].sl         = sl;
+      g_grid[idx].tp         = tp;
+      g_grid[idx].dynTPPrice = dynTP;
+      g_grid[idx].dynTPTaken = false;
+      g_grid[idx].rollingSL  = sl;
+      g_grid[idx].direction  = (type == ORDER_TYPE_BUY) ? 1 : -1;
+      g_grid[idx].level      = level;
       g_gridCount = idx + 1;
 
       string typeStr = (type == ORDER_TYPE_BUY) ? "BUY" : "SELL";
-      Print(">>> ", typeStr, " L", level, " @ ", DoubleToString(price, 2),
+      Print(">>> ", typeStr, " L", level,
+            " @ ", DoubleToString(price, 2),
             " | Lot: ", DoubleToString(lot, 2),
-            " | TP: ", DoubleToString(hiddenTP, 2));
+            " | SL: ", DoubleToString(sl, 2),
+            " | TP: ", DoubleToString(tp, 2),
+            " | DynTP(", DoubleToString(InpDynTPPercent, 0), "%): ", DoubleToString(dynTP, 2));
    }
    else
    {
@@ -283,7 +292,7 @@ void OpenPosition(ENUM_ORDER_TYPE type, int level)
 }
 
 //+------------------------------------------------------------------+
-//| Manage grid - hidden TP                                            |
+//| Manage grid - Dynamic TP + Rolling SL                             |
 //+------------------------------------------------------------------+
 void ManageGrid()
 {
@@ -292,13 +301,14 @@ void ManageGrid()
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol, tick)) return;
 
+   double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+
    for(int i = g_gridCount - 1; i >= 0; i--)
    {
       ulong ticket = g_grid[i].ticket;
 
       if(!PositionSelectByTicket(ticket))
       {
-         // Position closed - check if it was profit
          g_winStreak++;
          if(ScaleOnWins && g_winStreak >= 2)
          {
@@ -310,34 +320,157 @@ void ManageGrid()
       }
 
       double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+      double openPrice    = PositionGetDouble(POSITION_PRICE_OPEN);
+      double volume       = PositionGetDouble(POSITION_VOLUME);
       ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
 
-      // Check hidden TP hit
-      bool hitTP = false;
-      if(posType == POSITION_TYPE_BUY && currentPrice >= g_grid[i].hiddenTP) hitTP = true;
-      if(posType == POSITION_TYPE_SELL && currentPrice <= g_grid[i].hiddenTP) hitTP = true;
-
-      if(hitTP)
+      // --- DYNAMIC TP: Close 50% at partial target ---
+      if(!g_grid[i].dynTPTaken)
       {
-         Print(">>> TP HIT - Closing L", g_grid[i].level, " @ ", DoubleToString(currentPrice, 2));
-         ClosePosition(ticket);
+         bool hitDynTP = false;
+         if(posType == POSITION_TYPE_BUY  && currentPrice >= g_grid[i].dynTPPrice) hitDynTP = true;
+         if(posType == POSITION_TYPE_SELL && currentPrice <= g_grid[i].dynTPPrice) hitDynTP = true;
 
-         // Scale up on wins
-         g_winStreak++;
-         if(ScaleOnWins && g_winStreak >= 2)
+         if(hitDynTP)
          {
-            g_currentLot = LotSize * MathPow(WinScaleFactor, MathMin(g_winStreak - 1, 5));
-            Print("Win streak! Lot scaled to: ", DoubleToString(g_currentLot, 2));
-         }
+            double closeVol = NormalizeLot(volume * 0.5);
+            if(closeVol > 0)
+            {
+               Print(">>> DYN TP ", DoubleToString(InpDynTPPercent, 0),
+                     "% - Closing half L", g_grid[i].level,
+                     " @ ", DoubleToString(currentPrice, 2));
+               PartialClose(ticket, closeVol);
+               g_grid[i].dynTPTaken = true;
 
-         RemoveFromGrid(i);
-         continue;
+               // Move SL to breakeven after partial TP
+               double beSL = MathRound(openPrice / tickSize) * tickSize;
+               ModifySL(ticket, beSL);
+               g_grid[i].rollingSL = beSL;
+               Print("   SL moved to breakeven: ", DoubleToString(beSL, 2));
+            }
+         }
+      }
+
+      // --- ROLLING SL: Trail SL by 1.5x multiplier ---
+      if(g_grid[i].dynTPTaken)
+      {
+         double slDistance  = MathAbs(openPrice - g_grid[i].sl);
+         double rollTarget  = slDistance * InpRollingSLMult;
+         double newSL;
+
+         if(posType == POSITION_TYPE_BUY)
+         {
+            double profit = currentPrice - openPrice;
+            if(profit > rollTarget)
+            {
+               newSL = currentPrice - slDistance;
+               newSL = MathRound(newSL / tickSize) * tickSize;
+               if(newSL > g_grid[i].rollingSL)
+               {
+                  ModifySL(ticket, newSL);
+                  Print("   Rolling SL up L", g_grid[i].level,
+                        " -> ", DoubleToString(newSL, 2));
+                  g_grid[i].rollingSL = newSL;
+               }
+            }
+         }
+         else
+         {
+            double profit = openPrice - currentPrice;
+            if(profit > rollTarget)
+            {
+               newSL = currentPrice + slDistance;
+               newSL = MathRound(newSL / tickSize) * tickSize;
+               if(newSL < g_grid[i].rollingSL || g_grid[i].rollingSL == 0)
+               {
+                  ModifySL(ticket, newSL);
+                  Print("   Rolling SL down L", g_grid[i].level,
+                        " -> ", DoubleToString(newSL, 2));
+                  g_grid[i].rollingSL = newSL;
+               }
+            }
+         }
       }
    }
 }
 
 //+------------------------------------------------------------------+
-//| Close position                                                     |
+//| Partial close position                                             |
+//+------------------------------------------------------------------+
+bool PartialClose(ulong ticket, double volume)
+{
+   if(!PositionSelectByTicket(ticket)) return false;
+
+   ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+   string symbol = PositionGetString(POSITION_SYMBOL);
+
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol, tick)) return false;
+
+   MqlTradeRequest request;
+   MqlTradeResult result;
+   ZeroMemory(request);
+   ZeroMemory(result);
+
+   request.action       = TRADE_ACTION_DEAL;
+   request.position     = ticket;
+   request.symbol       = symbol;
+   request.volume       = volume;
+   request.deviation    = 50;
+   request.magic        = MagicNumber;
+   request.type_filling = GetFilling();
+
+   if(posType == POSITION_TYPE_BUY)
+   {
+      request.type  = ORDER_TYPE_SELL;
+      request.price = tick.bid;
+   }
+   else
+   {
+      request.type  = ORDER_TYPE_BUY;
+      request.price = tick.ask;
+   }
+
+   if(!OrderSend(request, result))
+   {
+      Print("ERROR: Partial close failed - ", GetLastError());
+      return false;
+   }
+
+   return (result.retcode == TRADE_RETCODE_DONE);
+}
+
+//+------------------------------------------------------------------+
+//| Modify stop loss on position                                       |
+//+------------------------------------------------------------------+
+bool ModifySL(ulong ticket, double newSL)
+{
+   if(!PositionSelectByTicket(ticket)) return false;
+
+   double currentTP = PositionGetDouble(POSITION_TP);
+
+   MqlTradeRequest request;
+   MqlTradeResult result;
+   ZeroMemory(request);
+   ZeroMemory(result);
+
+   request.action   = TRADE_ACTION_SLTP;
+   request.position = ticket;
+   request.symbol   = PositionGetString(POSITION_SYMBOL);
+   request.sl       = newSL;
+   request.tp       = currentTP;
+
+   if(!OrderSend(request, result))
+   {
+      Print("ERROR: ModifySL failed - ", GetLastError());
+      return false;
+   }
+
+   return (result.retcode == TRADE_RETCODE_DONE);
+}
+
+//+------------------------------------------------------------------+
+//| Close full position                                                |
 //+------------------------------------------------------------------+
 bool ClosePosition(ulong ticket)
 {
@@ -355,22 +488,22 @@ bool ClosePosition(ulong ticket)
    ZeroMemory(request);
    ZeroMemory(result);
 
-   request.action = TRADE_ACTION_DEAL;
-   request.position = ticket;
-   request.symbol = symbol;
-   request.volume = volume;
-   request.deviation = 50;
-   request.magic = MagicNumber;
+   request.action       = TRADE_ACTION_DEAL;
+   request.position     = ticket;
+   request.symbol       = symbol;
+   request.volume       = volume;
+   request.deviation    = 50;
+   request.magic        = MagicNumber;
    request.type_filling = GetFilling();
 
    if(posType == POSITION_TYPE_BUY)
    {
-      request.type = ORDER_TYPE_SELL;
+      request.type  = ORDER_TYPE_SELL;
       request.price = tick.bid;
    }
    else
    {
-      request.type = ORDER_TYPE_BUY;
+      request.type  = ORDER_TYPE_BUY;
       request.price = tick.ask;
    }
 
@@ -421,7 +554,6 @@ double GetLastEntryPrice(int direction)
 
       ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       int posDir = (posType == POSITION_TYPE_BUY) ? 1 : -1;
-
       if(posDir != direction) continue;
 
       datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
@@ -440,23 +572,17 @@ double GetLastEntryPrice(int direction)
 //+------------------------------------------------------------------+
 void SyncGrid()
 {
-   // Remove closed positions
    for(int i = g_gridCount - 1; i >= 0; i--)
    {
       bool found = false;
       for(int p = PositionsTotal() - 1; p >= 0; p--)
       {
          ulong t = PositionGetTicket(p);
-         if(t == g_grid[i].ticket)
-         {
-            found = true;
-            break;
-         }
+         if(t == g_grid[i].ticket) { found = true; break; }
       }
       if(!found) RemoveFromGrid(i);
    }
 
-   // Add untracked positions
    for(int p = PositionsTotal() - 1; p >= 0; p--)
    {
       ulong ticket = PositionGetTicket(p);
@@ -467,35 +593,37 @@ void SyncGrid()
       bool tracked = false;
       for(int i = 0; i < g_gridCount; i++)
       {
-         if(g_grid[i].ticket == ticket)
-         {
-            tracked = true;
-            break;
-         }
+         if(g_grid[i].ticket == ticket) { tracked = true; break; }
       }
 
       if(!tracked)
       {
          double entry = PositionGetDouble(POSITION_PRICE_OPEN);
-         double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+         double posSL = PositionGetDouble(POSITION_SL);
+         double posTP = PositionGetDouble(POSITION_TP);
          ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
 
          int idx = ArraySize(g_grid);
          ArrayResize(g_grid, idx + 1);
 
-         g_grid[idx].ticket = ticket;
-         g_grid[idx].entry = entry;
-         g_grid[idx].direction = (posType == POSITION_TYPE_BUY) ? 1 : -1;
-         g_grid[idx].level = idx + 1;
+         g_grid[idx].ticket     = ticket;
+         g_grid[idx].entry      = entry;
+         g_grid[idx].sl         = posSL;
+         g_grid[idx].tp         = posTP;
+         g_grid[idx].direction  = (posType == POSITION_TYPE_BUY) ? 1 : -1;
+         g_grid[idx].level      = idx + 1;
+         g_grid[idx].rollingSL  = posSL;
+         g_grid[idx].dynTPTaken = false;
+
+         // Calculate dynTP from existing position
+         double slDist = MathAbs(entry - posSL);
+         double tpDist = slDist * InpTPMultiplier;
+         double dynDist = tpDist * (InpDynTPPercent / 100.0);
 
          if(posType == POSITION_TYPE_BUY)
-         {
-            g_grid[idx].hiddenTP = entry + (TakeProfitPts * point);
-         }
+            g_grid[idx].dynTPPrice = entry + dynDist;
          else
-         {
-            g_grid[idx].hiddenTP = entry - (TakeProfitPts * point);
-         }
+            g_grid[idx].dynTPPrice = entry - dynDist;
 
          g_gridCount = idx + 1;
          Print("Synced position: ", ticket);
@@ -511,9 +639,7 @@ void RemoveFromGrid(int index)
    if(index < 0 || index >= g_gridCount) return;
 
    for(int i = index; i < g_gridCount - 1; i++)
-   {
       g_grid[i] = g_grid[i + 1];
-   }
 
    g_gridCount--;
    ArrayResize(g_grid, g_gridCount);
@@ -524,8 +650,8 @@ void RemoveFromGrid(int index)
 //+------------------------------------------------------------------+
 double NormalizeLot(double lot)
 {
-   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
 
    lot = MathMax(lot, minLot);

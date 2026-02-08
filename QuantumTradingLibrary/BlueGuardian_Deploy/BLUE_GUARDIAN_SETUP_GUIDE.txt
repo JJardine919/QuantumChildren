@@ -95,7 +95,7 @@ Terminal Data: 4613C16E0E09DDABD5134D36D83110E5
 
 2. Login with:
    Account: 365060
-   Password: )8xaE(gAuU
+   Password: [See .env file - BG_CHALLENGE_PASSWORD]
    Server: BlueGuardian-Server
 
 3. Open BTCUSD M1 chart
@@ -128,7 +128,7 @@ Terminal Data: 59C07D676775FCCF79E223EC24AB0D86
 
 2. Login with:
    Account: 366604
-   Password: YF^oHH&4Nm
+   Password: [See .env file - BG_INSTANT_PASSWORD]
    Server: BlueGuardian-Server
 
 3. Follow same steps 3-7 as above, but set:

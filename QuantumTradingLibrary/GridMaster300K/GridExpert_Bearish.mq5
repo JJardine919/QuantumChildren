@@ -38,7 +38,7 @@ input int      InpMaxTotalOrders    = 30;        // Max Total Orders (all expert
 input double   InpGridSpacingAtr    = 0.5;       // Grid Spacing (ATR multiples)
 
 input group "=== COMPRESSION FILTER ==="
-input double   InpConfidenceThreshold = 0.80;    // Confidence Threshold (80%)
+input double   InpConfidenceThreshold = 0.22;    // Confidence Threshold (22%)
 input int      InpCompressionBoost  = 12;        // Compression Boost
 
 input group "=== TRADING ==="

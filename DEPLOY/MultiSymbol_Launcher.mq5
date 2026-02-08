@@ -27,11 +27,11 @@ input bool     InpTradeETHUSD      = true;        // Trade ETHUSD (Ethereum)
 
 input group "=== LOT SIZES BY SYMBOL ==="
 input double   InpXauBaseLot       = 0.01;        // XAUUSD Base Lot
-input double   InpXauMaxLot        = 0.05;        // XAUUSD Max Lot
+input double   InpXauMaxLot        = 0.04;        // XAUUSD Max Lot
 input double   InpBtcBaseLot       = 0.01;        // BTCUSD Base Lot
-input double   InpBtcMaxLot        = 0.05;        // BTCUSD Max Lot
+input double   InpBtcMaxLot        = 0.04;        // BTCUSD Max Lot
 input double   InpEthBaseLot       = 0.01;        // ETHUSD Base Lot
-input double   InpEthMaxLot        = 0.10;        // ETHUSD Max Lot
+input double   InpEthMaxLot        = 0.04;        // ETHUSD Max Lot
 
 input group "=== GRID CONFIGURATION ==="
 input int      InpMaxPositionsPerSymbol = 5;      // Max Positions Per Symbol

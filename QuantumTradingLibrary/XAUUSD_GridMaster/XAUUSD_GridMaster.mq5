@@ -47,7 +47,7 @@ input int      InpMaxTotalOrders    = 15;            // Max Total Orders
 input double   InpGridSpacingAtr    = 0.75;          // Grid Spacing (ATR multiples)
 
 input group "=== ENTROPY FILTER (PREDICTABILITY) ==="
-input double   InpConfidenceThreshold = 0.65;        // Base Confidence Threshold
+input double   InpConfidenceThreshold = 0.22;        // Base Confidence Threshold
 input bool     InpUseEntropyFilter  = true;          // Use Entropy Filter
 input double   InpEntropyThreshold  = 2.0;           // Max Entropy (lower = more selective)
 

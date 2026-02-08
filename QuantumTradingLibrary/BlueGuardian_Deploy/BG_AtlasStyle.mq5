@@ -20,8 +20,8 @@ input int      InpMagicNumber    = 365001;              // Magic Number (matches
 input group "=== Trading Configuration - ATLAS STYLE ==="
 input ENUM_TIMEFRAMES InpTimeframe = PERIOD_M1;         // Timeframe (M1 like Atlas)
 input string   InpSymbol          = "BTCUSD";           // Symbol
-input double   InpBaseLot         = 0.06;               // Base Lot Size
-input double   InpMaxLot          = 0.07;               // Max Lot Size
+input double   InpBaseLot         = 0.01;               // Base Lot Size
+input double   InpMaxLot          = 0.04;               // Max Lot Size
 input int      InpTPPoints        = 450;                // Take Profit (points) ~400-500 like Atlas
 input bool     InpHiddenSLTP      = true;               // Hidden SL/TP (no visible SL like Atlas)
 

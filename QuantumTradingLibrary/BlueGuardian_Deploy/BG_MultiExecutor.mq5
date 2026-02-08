@@ -13,7 +13,7 @@
 //--- Input parameters (SET PER ACCOUNT)
 input string   AccountName      = "BG_INSTANT_1";     // Account identifier
 input int      MagicNumber      = 100001;             // Unique magic per account
-input double   MaxLotSize       = 0.5;                // Maximum lot size
+input double   MaxLotSize       = 0.04;               // Maximum lot size
 input double   DailyDDLimit     = 4.0;                // Daily drawdown limit %
 input double   MaxDDLimit       = 8.0;                // Max drawdown limit %
 input int      Slippage         = 50;                 // Max slippage points
@@ -22,21 +22,20 @@ input int      CheckInterval    = 10;                 // Signal check interval (
 input double   MaxSpreadPoints  = 100;                // Max spread to allow trade
 
 //=============================================================================
-// HARDCODED DYNAMIC SL/TP SETTINGS - DO NOT CHANGE
-// These values are locked for consistency across all account sizes
+// DYNAMIC SL/TP SETTINGS - Adjustable via inputs
 //=============================================================================
-#define FIXED_SL            1.0       // Use ATR-based (1 = multiplier base)
-#define SL_ATR_MULT         1.5       // SL = ATR * 1.5
-#define RR_RATIO            3.0       // Risk:Reward = 1:3
-#define USE_TRAILING_SL     true      // Trailing Stop ALWAYS ON
-#define USE_DYNAMIC_TP      true      // Dynamic TP ALWAYS ON
-#define BREAKEVEN_TRIGGER   0.5       // Move to BE at 50% of SL distance
-#define BREAKEVEN_BUFFER    5.0       // Buffer above breakeven
-#define TRAIL_START_MULT    1.0       // Start trail at 100% of SL profit
-#define TRAIL_DISTANCE      25.0      // Trail distance behind price
-#define USE_PARTIAL_TP      true      // Partial TP ALWAYS ON
-#define PARTIAL_TP_PCT      50.0      // Close 50% at partial TP
-#define PARTIAL_TP_TRIGGER  0.5       // Partial at 50% of full TP
+input group "=== Dynamic SL/TP Settings ==="
+input double   SL_ATR_MULT         = 1.5;       // SL ATR Multiplier (SL = ATR * this)
+input double   RR_RATIO            = 3.0;        // Risk:Reward Ratio (1:N)
+input bool     USE_TRAILING_SL     = true;       // Trailing Stop Enabled
+input bool     USE_DYNAMIC_TP      = true;       // Dynamic TP Enabled
+input double   BREAKEVEN_TRIGGER   = 0.5;        // Break-Even Trigger (% of SL dist)
+input double   BREAKEVEN_BUFFER    = 5.0;        // Break-Even Buffer (points)
+input double   TRAIL_START_MULT    = 1.0;        // Trail Start (% of SL profit)
+input double   TRAIL_DISTANCE      = 25.0;       // Trail Distance (points)
+input bool     USE_PARTIAL_TP      = true;       // Partial TP Enabled
+input double   PARTIAL_TP_PCT      = 50.0;       // Partial TP % to close
+input double   PARTIAL_TP_TRIGGER  = 0.5;        // Partial TP Trigger (% of full TP)
 //=============================================================================
 
 //--- Global variables
@@ -50,10 +49,12 @@ bool           g_blocked = false;
 string         g_blockReason = "";
 string         g_lastSignalTimestamp = "";
 
-//--- Position tracking for dynamic management
+//--- Position tracking for dynamic management (HIDDEN SL/TP)
 double         g_entryPrice = 0;
-double         g_initialSL = 0;
-double         g_initialTP = 0;
+double         g_initialSL = 0;     // Virtual SL (not sent to broker)
+double         g_initialTP = 0;     // Virtual TP (not sent to broker)
+double         g_currentVirtualSL = 0;  // Current virtual SL after trailing
+double         g_currentVirtualTP = 0;  // Current virtual TP after dynamic updates
 bool           g_breakevenHit = false;
 bool           g_partialClosed = false;
 bool           g_trailingActive = false;
@@ -234,16 +235,50 @@ void ManageOpenPositions()
 
         // Get position details
         double posOpenPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-        double posSL = PositionGetDouble(POSITION_SL);
-        double posTP = PositionGetDouble(POSITION_TP);
         double posVolume = PositionGetDouble(POSITION_VOLUME);
         ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+
+        // Use virtual SL/TP (hidden from broker)
+        double posSL = g_currentVirtualSL;
+        double posTP = g_currentVirtualTP;
 
         // Get current price
         MqlTick tick;
         if(!SymbolInfoTick(_Symbol, tick)) return;
 
         double currentPrice = (posType == POSITION_TYPE_BUY) ? tick.bid : tick.ask;
+
+        // Check if virtual SL or TP hit - close immediately
+        bool hitSL = false;
+        bool hitTP = false;
+        if(posSL > 0)
+        {
+            if(posType == POSITION_TYPE_BUY)
+            {
+                hitSL = (currentPrice <= posSL);
+                hitTP = (posTP > 0 && currentPrice >= posTP);
+            }
+            else
+            {
+                hitSL = (currentPrice >= posSL);
+                hitTP = (posTP > 0 && currentPrice <= posTP);
+            }
+        }
+
+        if(hitSL || hitTP)
+        {
+            Print(hitSL ? "[HIDDEN SL HIT]" : "[HIDDEN TP HIT]", " Closing at ", DoubleToString(currentPrice, _Digits));
+            ClosePartialPosition(ticket, posVolume, posType);
+            g_breakevenHit = false;
+            g_partialClosed = false;
+            g_trailingActive = false;
+            g_entryPrice = 0;
+            g_initialSL = 0;
+            g_initialTP = 0;
+            g_currentVirtualSL = 0;
+            g_currentVirtualTP = 0;
+            return;
+        }
 
         // Calculate profit distance
         double profitDist = (posType == POSITION_TYPE_BUY) ?
@@ -261,7 +296,7 @@ void ManageOpenPositions()
             riskDist = CalculateATR(14) * SL_ATR_MULT;
         }
 
-        // ===== 1. BREAKEVEN LOGIC =====
+        // ===== 1. BREAKEVEN LOGIC (virtual) =====
         if(USE_TRAILING_SL && !g_breakevenHit && BREAKEVEN_TRIGGER > 0)
         {
             double beThreshold = riskDist * BREAKEVEN_TRIGGER;
@@ -272,31 +307,27 @@ void ManageOpenPositions()
                 if(posType == POSITION_TYPE_BUY)
                 {
                     newSL = posOpenPrice + BREAKEVEN_BUFFER;
-                    if(newSL > posSL)
+                    if(newSL > g_currentVirtualSL)
                     {
-                        if(ModifyPositionSL(ticket, newSL))
-                        {
-                            g_breakevenHit = true;
-                            Print("[BREAKEVEN] SL moved to ", DoubleToString(newSL, _Digits), " (+", BREAKEVEN_BUFFER, " buffer)");
-                        }
+                        g_currentVirtualSL = newSL;
+                        g_breakevenHit = true;
+                        Print("[BREAKEVEN] Virtual SL moved to ", DoubleToString(newSL, _Digits), " (+", BREAKEVEN_BUFFER, " buffer)");
                     }
                 }
                 else // SELL
                 {
                     newSL = posOpenPrice - BREAKEVEN_BUFFER;
-                    if(newSL < posSL)
+                    if(newSL < g_currentVirtualSL)
                     {
-                        if(ModifyPositionSL(ticket, newSL))
-                        {
-                            g_breakevenHit = true;
-                            Print("[BREAKEVEN] SL moved to ", DoubleToString(newSL, _Digits), " (-", BREAKEVEN_BUFFER, " buffer)");
-                        }
+                        g_currentVirtualSL = newSL;
+                        g_breakevenHit = true;
+                        Print("[BREAKEVEN] Virtual SL moved to ", DoubleToString(newSL, _Digits), " (-", BREAKEVEN_BUFFER, " buffer)");
                     }
                 }
             }
         }
 
-        // ===== 2. TRAILING STOP LOGIC =====
+        // ===== 2. TRAILING STOP LOGIC (virtual) =====
         if(USE_TRAILING_SL && g_breakevenHit)
         {
             double trailThreshold = riskDist * TRAIL_START_MULT;
@@ -310,38 +341,34 @@ void ManageOpenPositions()
                 {
                     newSL = currentPrice - TRAIL_DISTANCE;
                     // Only move SL up, never down
-                    if(newSL > posSL)
+                    if(newSL > g_currentVirtualSL)
                     {
-                        if(ModifyPositionSL(ticket, newSL))
-                        {
-                            Print("[TRAILING] SL trailed to ", DoubleToString(newSL, _Digits),
-                                  " | Profit: ", DoubleToString(profitDist, 2));
-                        }
+                        g_currentVirtualSL = newSL;
+                        Print("[TRAILING] Virtual SL trailed to ", DoubleToString(newSL, _Digits),
+                              " | Profit: ", DoubleToString(profitDist, 2));
                     }
                 }
                 else // SELL
                 {
                     newSL = currentPrice + TRAIL_DISTANCE;
                     // Only move SL down, never up
-                    if(newSL < posSL)
+                    if(newSL < g_currentVirtualSL)
                     {
-                        if(ModifyPositionSL(ticket, newSL))
-                        {
-                            Print("[TRAILING] SL trailed to ", DoubleToString(newSL, _Digits),
-                                  " | Profit: ", DoubleToString(profitDist, 2));
-                        }
+                        g_currentVirtualSL = newSL;
+                        Print("[TRAILING] Virtual SL trailed to ", DoubleToString(newSL, _Digits),
+                              " | Profit: ", DoubleToString(profitDist, 2));
                     }
                 }
             }
         }
 
-        // ===== 3. DYNAMIC TP - Scale TP while maintaining R:R =====
+        // ===== 3. DYNAMIC TP - Scale TP while maintaining R:R (virtual) =====
         if(USE_DYNAMIC_TP && g_trailingActive)
         {
-            // Recalculate TP based on current SL to maintain R:R ratio
+            // Recalculate TP based on current virtual SL to maintain R:R ratio
             double currentRisk = (posType == POSITION_TYPE_BUY) ?
-                                (currentPrice - posSL) :
-                                (posSL - currentPrice);
+                                (currentPrice - g_currentVirtualSL) :
+                                (g_currentVirtualSL - currentPrice);
 
             if(currentRisk > 0)
             {
@@ -352,37 +379,33 @@ void ManageOpenPositions()
                 {
                     newTP = currentPrice + targetProfit;
                     // Only move TP up
-                    if(newTP > posTP)
+                    if(newTP > g_currentVirtualTP)
                     {
-                        if(ModifyPositionTP(ticket, newTP))
-                        {
-                            Print("[DYNAMIC TP] TP scaled to ", DoubleToString(newTP, _Digits),
-                                  " | Maintaining 1:", RR_RATIO, " R:R");
-                        }
+                        g_currentVirtualTP = newTP;
+                        Print("[DYNAMIC TP] Virtual TP scaled to ", DoubleToString(newTP, _Digits),
+                              " | Maintaining 1:", RR_RATIO, " R:R");
                     }
                 }
                 else // SELL
                 {
                     newTP = currentPrice - targetProfit;
                     // Only move TP down (lower is better for sells)
-                    if(newTP < posTP)
+                    if(newTP < g_currentVirtualTP || g_currentVirtualTP == 0)
                     {
-                        if(ModifyPositionTP(ticket, newTP))
-                        {
-                            Print("[DYNAMIC TP] TP scaled to ", DoubleToString(newTP, _Digits),
-                                  " | Maintaining 1:", RR_RATIO, " R:R");
-                        }
+                        g_currentVirtualTP = newTP;
+                        Print("[DYNAMIC TP] Virtual TP scaled to ", DoubleToString(newTP, _Digits),
+                              " | Maintaining 1:", RR_RATIO, " R:R");
                     }
                 }
             }
         }
 
-        // ===== 4. PARTIAL TAKE PROFIT =====
+        // ===== 4. PARTIAL TAKE PROFIT (using virtual TP) =====
         if(USE_PARTIAL_TP && !g_partialClosed)
         {
             double tpDist = (posType == POSITION_TYPE_BUY) ?
-                           (posTP - posOpenPrice) :
-                           (posOpenPrice - posTP);
+                           (g_currentVirtualTP - posOpenPrice) :
+                           (posOpenPrice - g_currentVirtualTP);
 
             double partialTrigger = tpDist * PARTIAL_TP_TRIGGER;
 
@@ -419,53 +442,25 @@ void ManageOpenPositions()
 }
 
 //+------------------------------------------------------------------+
-//| Modify position stop loss                                        |
+//| Modify position stop loss (Virtual Only - NOT sent to broker)    |
 //+------------------------------------------------------------------+
 bool ModifyPositionSL(ulong ticket, double newSL)
 {
-    MqlTradeRequest request;
-    MqlTradeResult result;
-    ZeroMemory(request);
-    ZeroMemory(result);
-
-    request.action = TRADE_ACTION_SLTP;
-    request.position = ticket;
-    request.symbol = _Symbol;
-    request.sl = NormalizeDouble(newSL, _Digits);
-    request.tp = PositionGetDouble(POSITION_TP);
-
-    if(!OrderSend(request, result))
-    {
-        Print("ERROR: ModifyPositionSL failed - ", GetLastError());
-        return false;
-    }
-
-    return (result.retcode == TRADE_RETCODE_DONE);
+    // Virtual SL management only - no broker modification
+    // The caller updates g_currentVirtualSL after this returns
+    // SL hit detection happens in ManageOpenPositions()
+    return PositionSelectByTicket(ticket);
 }
 
 //+------------------------------------------------------------------+
-//| Modify position take profit                                      |
+//| Modify position take profit (Virtual Only - NOT sent to broker)  |
 //+------------------------------------------------------------------+
 bool ModifyPositionTP(ulong ticket, double newTP)
 {
-    MqlTradeRequest request;
-    MqlTradeResult result;
-    ZeroMemory(request);
-    ZeroMemory(result);
-
-    request.action = TRADE_ACTION_SLTP;
-    request.position = ticket;
-    request.symbol = _Symbol;
-    request.sl = PositionGetDouble(POSITION_SL);
-    request.tp = NormalizeDouble(newTP, _Digits);
-
-    if(!OrderSend(request, result))
-    {
-        Print("ERROR: ModifyPositionTP failed - ", GetLastError());
-        return false;
-    }
-
-    return (result.retcode == TRADE_RETCODE_DONE);
+    // Virtual TP management only - no broker modification
+    // The caller updates g_currentVirtualTP after this returns
+    // TP hit detection happens in ManageOpenPositions()
+    return PositionSelectByTicket(ticket);
 }
 
 //+------------------------------------------------------------------+
@@ -707,8 +702,8 @@ void ExecuteTrade(ENUM_ORDER_TYPE type, double lots)
     request.volume = lots;
     request.type = type;
     request.price = price;
-    request.sl = NormalizeDouble(sl, _Digits);
-    request.tp = NormalizeDouble(tp, _Digits);
+    request.sl = 0;  // HIDDEN - managed internally via ManageOpenPositions()
+    request.tp = 0;  // HIDDEN - managed internally via ManageOpenPositions()
     request.deviation = Slippage;
     request.magic = MagicNumber;
     request.comment = "BG_" + AccountName;
@@ -725,13 +720,15 @@ void ExecuteTrade(ENUM_ORDER_TYPE type, double lots)
     {
         string typeStr = (type == ORDER_TYPE_BUY) ? "BUY" : "SELL";
         Print("SUCCESS [", AccountName, "]: ", typeStr, " ", lots, " lots @ ", price);
-        Print("  SL: ", sl, " | TP: ", tp, " | R:R = 1:", RR_RATIO);
+        Print("  Hidden SL: ", sl, " | Hidden TP: ", tp, " | R:R = 1:", RR_RATIO);
         g_tradesToday++;
 
-        // Store initial values for dynamic management
+        // Store initial values for hidden dynamic management
         g_entryPrice = price;
         g_initialSL = sl;
         g_initialTP = tp;
+        g_currentVirtualSL = sl;
+        g_currentVirtualTP = tp;
         g_breakevenHit = false;
         g_partialClosed = false;
         g_trailingActive = false;

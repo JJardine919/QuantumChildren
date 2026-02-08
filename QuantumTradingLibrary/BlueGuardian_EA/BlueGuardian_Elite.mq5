@@ -15,14 +15,13 @@ input int      InpMagicNumber     = 365001;        // Magic Number
 input double   InpVolume          = 0.01;          // Lot Size
 input double   InpRiskPercent     = 0.5;           // Risk % per trade
 
-input group "=== ATR Settings (HARD-CODED from +12 Expert) ==="
-// These are locked - matching the 89% win rate configuration
-const double   SL_ATR_MULT        = 1.5;           // Stop Loss = 1.5x ATR
-const double   TP_ATR_MULT        = 3.0;           // Take Profit = 3.0x ATR
-const double   COMPRESSION_BOOST  = 12.0;          // +12 Confidence Boost
-const double   PARTIAL_TP_RATIO   = 0.5;           // 50% partial take profit
-const double   BE_TRIGGER_PCT     = 0.30;          // Break-even at 30% of TP
-const double   TRAIL_TRIGGER_PCT  = 0.50;          // Trail start at 50% of TP
+input group "=== ATR Settings ==="
+input double   SL_ATR_MULT        = 1.5;           // Stop Loss ATR Multiplier
+input double   TP_ATR_MULT        = 3.0;           // Take Profit ATR Multiplier
+input double   COMPRESSION_BOOST  = 12.0;          // Confidence Boost
+input double   PARTIAL_TP_RATIO   = 0.5;           // Partial Take Profit Ratio (50%)
+input double   BE_TRIGGER_PCT     = 0.30;          // Break-even Trigger (% of TP)
+input double   TRAIL_TRIGGER_PCT  = 0.50;          // Trail Start (% of TP)
 
 input group "=== Entry Filter Settings ==="
 input int      InpATRPeriod       = 14;            // ATR Period
@@ -30,7 +29,7 @@ input int      InpEMAFast         = 8;             // Fast EMA
 input int      InpEMASlow         = 21;            // Slow EMA
 input int      InpEMA200          = 200;           // Trend EMA
 input int      InpRSIPeriod       = 14;            // RSI Period
-input double   InpConfidenceThresh = 0.80;         // Base Confidence Threshold
+input double   InpConfidenceThresh = 0.22;         // Base Confidence Threshold
 
 input group "=== Risk Management ==="
 input double   InpDailyDDLimit    = 4.5;           // Daily DD Limit %

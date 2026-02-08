@@ -10,9 +10,16 @@ import requests
 import json
 import time
 import logging
+import sys
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, List
+from pathlib import Path
+
+# Add QuantumTradingLibrary to path for credential_manager and config
+sys.path.insert(0, str(Path(__file__).parent.parent / "QuantumTradingLibrary"))
+from credential_manager import get_credentials, CredentialError
+from config_loader import MAX_LOSS_DOLLARS
 
 # Configure logging
 logging.basicConfig(
@@ -46,12 +53,23 @@ OLLAMA_MODEL = "mistral"  # or "llama2", "codellama", etc.
 # Symbols to monitor
 SYMBOLS = ["XAUUSD", "BTCUSD", "ETHUSD"]
 
-# GetLeveraged accounts
-ACCOUNTS = [
-    {"login": 113328, "password": "H*M5c7jpR7", "server": "GetLeveraged-Trade"},
-    {"login": 113326, "password": "%bwN)IvJ5F", "server": "GetLeveraged-Trade"},
-    {"login": 107245, "password": "$86eCmFbXR", "server": "GetLeveraged-Trade"},
-]
+# GetLeveraged accounts - loaded from credential_manager
+def load_accounts():
+    """Load account credentials from credential_manager"""
+    accounts = []
+    for key in ['GL_2', 'GL_1', 'GL_3']:
+        try:
+            creds = get_credentials(key)
+            accounts.append({
+                "login": creds['account'],
+                "password": creds['password'],
+                "server": creds['server']
+            })
+        except CredentialError as e:
+            logger.warning(f"Could not load credentials for {key}: {e}")
+    return accounts
+
+ACCOUNTS = load_accounts()
 
 # =============================================================================
 # DATA STRUCTURES
@@ -346,6 +364,29 @@ def analyze_symbol(symbol: str) -> Optional[MarketAnalysis]:
 
     # Get LLM suggestion (falls back to rules if unavailable)
     sl_mult, tp_mult, reasoning = get_llm_sltp_suggestion(analysis_dict)
+
+    # Cap SL so dollar loss never exceeds MAX_LOSS_DOLLARS from MASTER_CONFIG.
+    # For a standard 0.01 lot on most symbols, tick_value ~ $0.01/tick.
+    # We cap the ATR-based SL distance by checking if sl_mult * atr would
+    # produce an unreasonable stop. If the symbol is available, use its
+    # tick_value for an exact cap; otherwise apply a conservative ceiling.
+    symbol_info = mt5.symbol_info(symbol)
+    if symbol_info and atr > 0:
+        tick_value = symbol_info.trade_tick_value
+        tick_size = symbol_info.trade_tick_size
+        base_lot = max(symbol_info.volume_min, 0.01)
+        if tick_value > 0 and tick_size > 0 and base_lot > 0:
+            # Max SL distance in price for MAX_LOSS_DOLLARS
+            max_sl_ticks = MAX_LOSS_DOLLARS / (tick_value * base_lot)
+            max_sl_distance = max_sl_ticks * tick_size
+            # Current proposed SL distance in price
+            proposed_sl_distance = sl_mult * atr
+            if proposed_sl_distance > max_sl_distance:
+                old_sl_mult = sl_mult
+                sl_mult = max_sl_distance / atr
+                sl_mult = max(MIN_SL_MULT, sl_mult)  # Don't go below minimum
+                reasoning += f"; SL capped from {old_sl_mult:.2f}x to {sl_mult:.2f}x (MAX_LOSS=${MAX_LOSS_DOLLARS})"
+                logger.warning(f"  {symbol}: SL mult capped {old_sl_mult:.2f} -> {sl_mult:.2f} to respect ${MAX_LOSS_DOLLARS} max loss")
 
     return MarketAnalysis(
         symbol=symbol,

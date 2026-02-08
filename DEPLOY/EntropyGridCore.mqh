@@ -107,6 +107,12 @@ public:
    void           SetMaxPositions(int maxPos);
    void           SetDrawdownLimits(double dailyDD, double maxDD);
    void           SetRiskPercent(double riskPct);
+   void           SetATRMultipliers(double slMult, double tpMult);
+   void           SetPartialTPRatio(double ratio);
+   void           SetBreakEvenTrigger(double trigger);
+   void           SetTrailStartTrigger(double trigger);
+   void           SetCompressionBoost(int boost);
+   void           SetConfidenceThreshold(double threshold);
    void           Deinitialize(void);
 
    // Core Operations
@@ -170,7 +176,7 @@ CEntropyGridManager::CEntropyGridManager(void)
    m_lastGridPrice = 0;
 
    // Hard-coded per specification
-   m_confidenceThreshold = 0.80;
+   m_confidenceThreshold = 0.22;
    m_compressionBoost = 12;
    m_slAtrMultiplier = 1.5;
    m_tpAtrMultiplier = 3.0;
@@ -285,6 +291,55 @@ void CEntropyGridManager::SetDrawdownLimits(double dailyDD, double maxDD)
 void CEntropyGridManager::SetRiskPercent(double riskPct)
 {
    m_riskPerTradePct = riskPct;
+}
+
+//+------------------------------------------------------------------+
+//| Set ATR Multipliers (allows parent EA to override defaults)        |
+//+------------------------------------------------------------------+
+void CEntropyGridManager::SetATRMultipliers(double slMult, double tpMult)
+{
+   m_slAtrMultiplier = slMult;
+   m_tpAtrMultiplier = tpMult;
+}
+
+//+------------------------------------------------------------------+
+//| Set Partial TP Ratio                                               |
+//+------------------------------------------------------------------+
+void CEntropyGridManager::SetPartialTPRatio(double ratio)
+{
+   m_partialTpRatio = ratio;
+}
+
+//+------------------------------------------------------------------+
+//| Set Break Even Trigger                                             |
+//+------------------------------------------------------------------+
+void CEntropyGridManager::SetBreakEvenTrigger(double trigger)
+{
+   m_breakEvenTrigger = trigger;
+}
+
+//+------------------------------------------------------------------+
+//| Set Trail Start Trigger                                            |
+//+------------------------------------------------------------------+
+void CEntropyGridManager::SetTrailStartTrigger(double trigger)
+{
+   m_trailStartTrigger = trigger;
+}
+
+//+------------------------------------------------------------------+
+//| Set Compression Boost                                              |
+//+------------------------------------------------------------------+
+void CEntropyGridManager::SetCompressionBoost(int boost)
+{
+   m_compressionBoost = boost;
+}
+
+//+------------------------------------------------------------------+
+//| Set Confidence Threshold                                           |
+//+------------------------------------------------------------------+
+void CEntropyGridManager::SetConfidenceThreshold(double threshold)
+{
+   m_confidenceThreshold = threshold;
 }
 
 //+------------------------------------------------------------------+
@@ -436,8 +491,7 @@ double CEntropyGridManager::GetEntropyConfidence(void)
 
    double confidence = 0.0;
 
-   // 1. EMA Alignment (30% weight)
-   // All EMAs aligned = low entropy
+   // 1. EMA Alignment (30% weight) - ETARE-loosened: partial alignment scores higher
    double emaFast = m_emaFastBuffer[1];
    double emaSlow = m_emaSlowBuffer[1];
    double ema200 = m_ema200Buffer[1];
@@ -449,42 +503,40 @@ double CEntropyGridManager::GetEntropyConfidence(void)
    if(allAbove || allBelow)
       confidence += 0.30;
    else if((emaFast > emaSlow) || (emaFast < emaSlow))
-      confidence += 0.15;
+      confidence += 0.22; // Was 0.15 - ETARE: partial alignment still valuable
 
-   // 2. EMA Separation Consistency (20% weight)
-   // Consistent separation = trending market = lower entropy
+   // 2. EMA Separation Consistency (20% weight) - ETARE-loosened: wider tolerance
    double sep1 = MathAbs(m_emaFastBuffer[1] - m_emaSlowBuffer[1]);
    double sep2 = MathAbs(m_emaFastBuffer[5] - m_emaSlowBuffer[5]);
    double sepChange = MathAbs(sep1 - sep2) / (sep2 + 1e-10);
 
-   if(sepChange < 0.10)
-      confidence += 0.20; // Very consistent
-   else if(sepChange < 0.20)
-      confidence += 0.10; // Somewhat consistent
-
-   // 3. RSI Range (25% weight)
-   // RSI in 30-70 range = ranging/predictable
-   // RSI extreme = trending/less predictable for mean reversion
-   double rsi = m_rsiBuffer[1];
-   if(rsi >= 40 && rsi <= 60)
-      confidence += 0.25; // Balanced
-   else if(rsi >= 30 && rsi <= 70)
-      confidence += 0.15; // Normal range
+   if(sepChange < 0.15)      // Was 0.10
+      confidence += 0.20;
+   else if(sepChange < 0.30) // Was 0.20
+      confidence += 0.12;    // Was 0.10
    else
-      confidence += 0.05; // Extreme
+      confidence += 0.05;    // ETARE: even inconsistent gets a small score
 
-   // 4. ATR Stability (25% weight)
-   // Stable ATR = predictable volatility
+   // 3. RSI Range (25% weight) - ETARE-loosened: wider acceptable range
+   double rsi = m_rsiBuffer[1];
+   if(rsi >= 35 && rsi <= 65)      // Was 40-60
+      confidence += 0.25;
+   else if(rsi >= 25 && rsi <= 75) // Was 30-70
+      confidence += 0.18;          // Was 0.15
+   else
+      confidence += 0.08;          // Was 0.05 - ETARE: extremes still tradeable
+
+   // 4. ATR Stability (25% weight) - ETARE-loosened: more volatility tolerance
    double atr1 = m_atrBuffer[1];
    double atr5 = m_atrBuffer[5];
    double atrChange = MathAbs(atr1 - atr5) / (atr5 + 1e-10);
 
-   if(atrChange < 0.15)
+   if(atrChange < 0.20)      // Was 0.15
       confidence += 0.25;
-   else if(atrChange < 0.30)
-      confidence += 0.15;
+   else if(atrChange < 0.40) // Was 0.30
+      confidence += 0.18;    // Was 0.15
    else
-      confidence += 0.05;
+      confidence += 0.08;    // Was 0.05
 
    // Apply compression boost
    confidence += (m_compressionBoost / 100.0);

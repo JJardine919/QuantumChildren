@@ -7,15 +7,16 @@
 #property version   "1.00"
 
 //+------------------------------------------------------------------+
-//| HARD-CODED ATR MULTIPLIERS (AS REQUIRED)                         |
+//| ATR MULTIPLIER SETTINGS (adjustable via EA inputs)               |
 //+------------------------------------------------------------------+
-#define ATR_SL_MULTIPLIER       1.5     // Stop Loss = 1.5x ATR
-#define ATR_TP_MULTIPLIER       3.0     // Take Profit = 3.0x ATR
-#define ATR_PERIOD              14      // Standard ATR period
-#define PARTIAL_TP_PERCENT      50      // 50% of position at first TP
-#define TRAILING_ACTIVATION     0.50    // Activate trailing at 50% of TP
-#define BREAKEVEN_ACTIVATION    0.30    // Move to BE at 30% of TP
-#define COMPRESSION_BOOST       12      // +12 compression confidence boost
+input group "=== ATR / SL / TP Core Settings ==="
+input double   ATR_SL_MULTIPLIER       = 1.5;     // Stop Loss ATR Multiplier
+input double   ATR_TP_MULTIPLIER       = 3.0;     // Take Profit ATR Multiplier
+input int      ATR_PERIOD              = 14;       // ATR Period
+input double   PARTIAL_TP_PERCENT      = 50.0;    // Partial TP % at first target
+input double   TRAILING_ACTIVATION     = 0.50;    // Trailing Activation (% of TP)
+input double   BREAKEVEN_ACTIVATION    = 0.30;    // Break-Even Activation (% of TP)
+input int      COMPRESSION_BOOST       = 12;       // Compression Confidence Boost
 
 //+------------------------------------------------------------------+
 //| Regime Enumeration                                               |
@@ -1194,23 +1195,10 @@ bool CXAUGridManager::ClosePosition(ulong ticket, double volume)
 //+------------------------------------------------------------------+
 bool CXAUGridManager::ModifyPosition(ulong ticket, double sl, double tp)
 {
-   MqlTradeRequest request;
-   MqlTradeResult result;
-   ZeroMemory(request);
-   ZeroMemory(result);
-
-   request.action = TRADE_ACTION_SLTP;
-   request.position = ticket;
-   request.sl = sl;
-   request.tp = tp;
-
-   if(!OrderSend(request, result))
-   {
-      Print("XAUUSD Modify position failed: ", GetLastError());
-      return false;
-   }
-
-   return (result.retcode == TRADE_RETCODE_DONE);
+   // Virtual SL/TP management only - NOT sent to broker
+   // All SL/TP is managed internally via virtualSL/virtualTP in grid position struct
+   // This function exists for interface compatibility only
+   return PositionSelectByTicket(ticket);
 }
 
 //+------------------------------------------------------------------+
