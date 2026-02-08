@@ -5,7 +5,7 @@
     "TRADING_SETTINGS": {
         "MAX_LOSS_DOLLARS": 1.00,
         "INITIAL_SL_DOLLARS": 0.60,
-        "TP_MULTIPLIER": 3.0,
+        "TP_MULTIPLIER": 3,
         "ROLLING_SL_MULTIPLIER": 1.5,
         "DYNAMIC_TP_PERCENT": 50,
         "SET_DYNAMIC_TP": true,
@@ -15,6 +15,7 @@
         "AGENT_SL_MAX": 1.00,
         "WATCHDOG_LIMIT": 1.00,
         "CHECK_INTERVAL_SECONDS": 30,
+        "ATR_MULTIPLIER": 0.0438,
         "REQUIRE_TRAINED_EXPERT": true
     },
 
@@ -80,6 +81,14 @@
             "terminal_path": null,
             "magic": 107001,
             "symbols": ["BTCUSD", "ETHUSD"],
+            "enabled": true
+        },
+        "FTMO": {
+            "account": 1521063483,
+            "server": "FTMO-Demo2",
+            "terminal_path": "C:\\Program Files\\FTMO Global Markets MT5 Terminal\\terminal64.exe",
+            "magic": 152001,
+            "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
             "enabled": true
         }
     },

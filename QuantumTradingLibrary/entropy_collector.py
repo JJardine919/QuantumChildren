@@ -165,7 +165,8 @@ def _save_local(data: dict, category: str):
 def _send_to_server(data: dict, endpoint: str) -> bool:
     """Send data to collection server"""
     try:
-        url = COLLECTION_SERVER.rstrip('/collect') + endpoint
+        base_url = COLLECTION_SERVER.replace('/collect', '')
+        url = base_url + endpoint
         response = requests.post(
             url,
             json=data,
@@ -182,10 +183,13 @@ def _send_to_server(data: dict, endpoint: str) -> bool:
             return False
 
     except requests.exceptions.Timeout:
+        print(f"[QuantumChildren] Server timeout: {url}")
         return False
     except requests.exceptions.ConnectionError:
+        print(f"[QuantumChildren] Server unreachable: {url}")
         return False
     except Exception as e:
+        print(f"[QuantumChildren] Send error: {e}")
         return False
 
 

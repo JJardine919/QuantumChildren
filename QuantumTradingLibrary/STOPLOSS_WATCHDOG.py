@@ -22,9 +22,11 @@ import MetaTrader5 as mt5
 # Load config
 try:
     from config_loader import MAX_LOSS_DOLLARS, AGENT_SL_MAX, ACCOUNTS
+    from credential_manager import get_credentials, CredentialError
     LOSS_LIMIT = AGENT_SL_MAX  # Use AGENT_SL_MAX from config ($1.00)
 except ImportError:
     LOSS_LIMIT = 1.50  # Fallback
+    CredentialError = Exception  # Fallback
 
 # Override - hard cap at $1.00 no matter what
 MAX_LOSS_PER_TRADE = 1.00
@@ -240,20 +242,30 @@ def main():
     # Get account config
     try:
         from config_loader import ACCOUNTS
+        from credential_manager import get_credentials, CredentialError
         if args.account not in ACCOUNTS:
             print(f"Unknown account: {args.account}")
             print(f"Available: {list(ACCOUNTS.keys())}")
             return
-        account_config = ACCOUNTS[args.account]
+        account_config = ACCOUNTS[args.account].copy()
+        # Ensure password is loaded from credential_manager
+        if not account_config.get('password'):
+            try:
+                creds = get_credentials(args.account)
+                account_config['password'] = creds['password']
+            except CredentialError as e:
+                print(f"Error loading credentials: {e}")
+                return
     except ImportError:
-        # Fallback to hardcoded Atlas
-        account_config = {
-            'account': 212000584,
-            'password': 'M6NLk79MN@',
-            'server': 'AtlasFunded-Server',
-            'terminal_path': r"C:\Program Files\Atlas Funded MT5 Terminal\terminal64.exe",
-            'name': 'Atlas Funded',
-        }
+        # Fallback - try to load from credential_manager directly
+        try:
+            from credential_manager import get_credentials, CredentialError
+            creds = get_credentials(args.account)
+            account_config = creds
+            account_config['name'] = args.account
+        except Exception as e:
+            print(f"Failed to load credentials: {e}")
+            return
 
     watchdog = StopLossWatchdog(account_config, loss_limit=args.limit)
     watchdog.run(check_interval=args.interval)

@@ -26,11 +26,20 @@ except ImportError:
 class MT5Manager:
     """Direct MT5 management"""
 
+    # Known magic numbers from the trading system
+    KNOWN_MAGIC = {
+        212001, 366001, 365001, 113001, 113002, 107001,
+        888888, 999999, 20251222, 20251227,
+    }
+
     def __init__(self):
         self.connected_account = None
 
     def connect(self, account_key: str = None) -> dict:
         """Connect to MT5 account"""
+        # ALWAYS shutdown first to prevent terminal mixing
+        mt5.shutdown()
+
         if account_key and account_key in ACCOUNTS:
             acc = ACCOUNTS[account_key]
             terminal_path = acc.get('terminal_path')
@@ -203,6 +212,116 @@ class MT5Manager:
             "positions": positions
         }
 
+    def scan_no_sl(self) -> dict:
+        """Scan all positions for missing stop losses and rogue magic numbers"""
+        positions = mt5.positions_get()
+        if positions is None:
+            return {"error": "Could not get positions"}
+
+        no_sl = []
+        no_tp = []
+        rogue = []
+
+        for pos in positions:
+            direction = "BUY" if pos.type == 0 else "SELL"
+            entry = {
+                "ticket": pos.ticket,
+                "symbol": pos.symbol,
+                "type": direction,
+                "volume": pos.volume,
+                "open_price": pos.price_open,
+                "current_price": pos.price_current,
+                "sl": pos.sl,
+                "tp": pos.tp,
+                "profit": pos.profit,
+                "magic": pos.magic,
+                "comment": pos.comment,
+                "time": datetime.fromtimestamp(pos.time).isoformat(),
+            }
+
+            if pos.sl == 0.0:
+                no_sl.append(entry)
+            if pos.tp == 0.0:
+                no_tp.append(entry)
+            if pos.magic not in self.KNOWN_MAGIC:
+                rogue.append(entry)
+
+        return {
+            "total_positions": len(positions),
+            "missing_sl": len(no_sl),
+            "missing_tp": len(no_tp),
+            "rogue_magic": len(rogue),
+            "positions_without_sl": no_sl,
+            "positions_without_tp": no_tp,
+            "rogue_trades": rogue,
+        }
+
+    def force_emergency_sl(self, ticket: int, max_loss_dollars: float = 2.0) -> dict:
+        """Apply emergency SL to a position based on max dollar loss from CURRENT price"""
+        positions = mt5.positions_get(ticket=ticket)
+        if not positions:
+            return {"error": f"Position {ticket} not found"}
+
+        pos = positions[0]
+        if pos.sl != 0.0:
+            return {"info": f"Position {ticket} already has SL={pos.sl}", "current_sl": pos.sl}
+
+        symbol_info = mt5.symbol_info(pos.symbol)
+        tick = mt5.symbol_info_tick(pos.symbol)
+        if symbol_info is None or tick is None:
+            return {"error": f"Cannot get symbol info/tick for {pos.symbol}"}
+
+        tick_value = symbol_info.trade_tick_value
+        tick_size = symbol_info.trade_tick_size
+        point = symbol_info.point
+        digits = symbol_info.digits
+        stops_level = symbol_info.trade_stops_level
+        spread = symbol_info.spread
+
+        # Calculate SL distance for max_loss_dollars
+        if tick_value > 0 and pos.volume > 0:
+            sl_ticks = max_loss_dollars / (tick_value * pos.volume)
+            sl_distance = sl_ticks * tick_size
+        else:
+            sl_distance = 200 * point
+
+        # Respect broker minimum stop distance
+        min_sl_distance = (stops_level + spread + 20) * point
+        if sl_distance < min_sl_distance:
+            sl_distance = min_sl_distance
+
+        # Calculate SL from CURRENT price (not open price)
+        if pos.type == mt5.POSITION_TYPE_BUY:
+            current = tick.bid
+            sl_price = round(current - sl_distance, digits)
+        else:
+            current = tick.ask
+            sl_price = round(current + sl_distance, digits)
+
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "symbol": pos.symbol,
+            "position": ticket,
+            "sl": sl_price,
+            "tp": pos.tp,
+        }
+
+        result = mt5.order_send(request)
+        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+            return {
+                "success": True,
+                "ticket": ticket,
+                "new_sl": sl_price,
+                "current_price": current,
+                "sl_distance": round(sl_distance, digits),
+                "max_further_loss": max_loss_dollars,
+            }
+        else:
+            return {
+                "error": f"SL modify failed: {result.comment if result else 'None'} ({result.retcode if result else 'N/A'})",
+                "attempted_sl": sl_price,
+            }
+
     def get_history(self, days: int = 1) -> list:
         """Get closed trades history"""
         from datetime import timedelta
@@ -324,6 +443,23 @@ def handle_request(request: dict) -> dict:
                                 "days": {"type": "integer", "description": "Number of days (default 1)"}
                             }
                         }
+                    },
+                    {
+                        "name": "mt5_scan_no_sl",
+                        "description": "Scan all positions for missing stop losses and rogue trades (unknown magic numbers)",
+                        "inputSchema": {"type": "object", "properties": {}}
+                    },
+                    {
+                        "name": "mt5_force_sl",
+                        "description": "Apply emergency stop loss to a position missing SL. Sets SL based on max dollar loss from CURRENT price.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "ticket": {"type": "integer", "description": "Position ticket"},
+                                "max_loss_dollars": {"type": "number", "description": "Max further loss in dollars from current price (default 2.00)"}
+                            },
+                            "required": ["ticket"]
+                        }
                     }
                 ]
             }
@@ -348,6 +484,10 @@ def handle_request(request: dict) -> dict:
                 result = manager.modify_sl_tp(args["ticket"], sl=args["sl"])
             elif tool_name == "mt5_history":
                 result = manager.get_history(args.get("days", 1))
+            elif tool_name == "mt5_scan_no_sl":
+                result = manager.scan_no_sl()
+            elif tool_name == "mt5_force_sl":
+                result = manager.force_emergency_sl(args["ticket"], args.get("max_loss_dollars", 2.0))
             else:
                 result = {"error": f"Unknown tool: {tool_name}"}
 
