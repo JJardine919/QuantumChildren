@@ -603,7 +603,7 @@ class AccountTrader:
             if self.teqa_bridge is not None and action is not None:
                 lstm_action_str = action.name  # 'BUY', 'SELL', or 'HOLD'
                 final_action_str, final_conf, lot_mult, teqa_reason = \
-                    self.teqa_bridge.apply_to_lstm(lstm_action_str, confidence)
+                    self.teqa_bridge.apply_to_lstm(lstm_action_str, confidence, symbol=symbol)
                 # Map back to Action enum
                 action_map = {'BUY': Action.BUY, 'SELL': Action.SELL, 'HOLD': Action.HOLD}
                 action = action_map.get(final_action_str, Action.HOLD)

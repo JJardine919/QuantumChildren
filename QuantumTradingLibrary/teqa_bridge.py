@@ -1,12 +1,13 @@
 """
-TEQA BRIDGE v3.0 - Quantum Signal Reader for BRAIN Scripts
-===========================================================
-Reads te_quantum_signal.json written by TEQA v3.0 (or v2.0) and provides
-a clean interface for BRAIN trading scripts.
+TEQA BRIDGE v3.1 - Symbol-Aware Quantum Signal Reader for BRAIN Scripts
+========================================================================
+Reads te_quantum_signal.json (or per-symbol te_quantum_signal_BTCUSD.json)
+written by TEQA v3.0/v3.1 and provides a clean interface for BRAIN scripts.
 
 Pipeline: TEQA → JSON → teqa_bridge → BRAIN → Trade
 
 Backward compatible: reads both v2.0 and v3.0 signal formats.
+Symbol-aware: per-symbol signal files with fallback to generic file.
 
 Author: DooDoo + Claude
 Date: 2026-02-07
@@ -141,43 +142,82 @@ class TEQABridge:
     """
     Reads TEQA quantum signals and integrates with BRAIN trading decisions.
     Compatible with both v2.0 and v3.0 signal formats.
+    Supports per-symbol signal files with fallback to generic file.
 
     Usage:
         bridge = TEQABridge()
 
-        # In your analysis loop:
-        signal = bridge.read_signal()
+        # In your analysis loop (symbol-aware):
+        signal = bridge.read_signal(symbol='BTCUSD')
         if signal and not signal.is_stale:
             action, conf, lot_mult, reason = bridge.apply_to_lstm(
-                lstm_action='BUY', lstm_confidence=0.65
+                lstm_action='BUY', lstm_confidence=0.65, symbol='BTCUSD'
             )
     """
 
     def __init__(self, signal_path: str = None, staleness_minutes: float = 5.0):
         if signal_path is None:
-            self.signal_path = Path(__file__).parent / "te_quantum_signal.json"
+            self._signal_dir = Path(__file__).parent
+            self.signal_path = self._signal_dir / "te_quantum_signal.json"
         else:
             self.signal_path = Path(signal_path)
+            self._signal_dir = self.signal_path.parent
         self.staleness_minutes = staleness_minutes
-        self._last_signal: Optional[TEQASignal] = None
-        self._last_read_time: Optional[datetime] = None
-        self._file_mtime: float = 0.0
+        # Per-symbol cache: symbol_key -> (signal, mtime)
+        # symbol_key is the symbol string, or "__generic__" for the legacy file
+        self._signal_cache: Dict[str, Tuple[Optional[TEQASignal], float]] = {}
 
-    def read_signal(self) -> Optional[TEQASignal]:
-        """Read and parse the TEQA signal JSON. Returns None if file missing or corrupt."""
-        if not self.signal_path.exists():
+    def _resolve_signal_path(self, symbol: str = None) -> Tuple[Path, str]:
+        """
+        Resolve which signal file to read and the cache key.
+        If symbol given, try per-symbol file first, fall back to generic.
+        Returns (path, cache_key).
+        """
+        if symbol:
+            per_symbol_path = self._signal_dir / f"te_quantum_signal_{symbol}.json"
+            if per_symbol_path.exists():
+                return per_symbol_path, symbol
+            # Fall back to generic file
+            return self.signal_path, f"__generic__{symbol}"
+        return self.signal_path, "__generic__"
+
+    def read_signal(self, symbol: str = None) -> Optional[TEQASignal]:
+        """
+        Read and parse the TEQA signal JSON. Returns None if file missing or corrupt.
+
+        Args:
+            symbol: Optional symbol to look up. If provided, checks for
+                    te_quantum_signal_{symbol}.json first, then falls back
+                    to te_quantum_signal.json. When reading the generic file
+                    with a symbol requested, verifies the signal's symbol matches.
+        """
+        file_path, cache_key = self._resolve_signal_path(symbol)
+
+        if not file_path.exists():
             return None
 
         # Skip re-reading if file hasn't changed
-        current_mtime = self.signal_path.stat().st_mtime
-        if current_mtime == self._file_mtime and self._last_signal is not None:
-            # Update staleness check
-            self._last_signal.is_stale = self._check_stale(self._last_signal.timestamp)
-            return self._last_signal
+        current_mtime = file_path.stat().st_mtime
+        cached = self._signal_cache.get(cache_key)
+        if cached is not None:
+            cached_signal, cached_mtime = cached
+            if current_mtime == cached_mtime and cached_signal is not None:
+                # Update staleness check
+                cached_signal.is_stale = self._check_stale(cached_signal.timestamp)
+                return cached_signal
 
         try:
-            with open(self.signal_path, 'r') as f:
+            with open(file_path, 'r') as f:
                 data = json.load(f)
+
+            # If we fell back to generic file but a specific symbol was requested,
+            # check that the signal's symbol matches
+            signal_symbol = data.get('symbol', '')
+            if symbol and cache_key.startswith("__generic__") and signal_symbol:
+                if signal_symbol != symbol:
+                    logger.debug(f"[TEQA] Signal symbol mismatch: file has {signal_symbol}, "
+                                 f"requested {symbol} -- returning None")
+                    return None
 
             ts = datetime.fromisoformat(data['timestamp'])
             is_stale = self._check_stale(ts)
@@ -234,12 +274,10 @@ class TEQABridge:
                 n_active_class_i=te_summary.get('n_active_class_i', 0),
                 n_active_class_ii=te_summary.get('n_active_class_ii', 0),
                 n_active_neural=te_summary.get('n_active_neural', 0),
-                symbol=data.get('symbol', ''),
+                symbol=signal_symbol,
             )
 
-            self._last_signal = signal
-            self._file_mtime = current_mtime
-            self._last_read_time = datetime.now()
+            self._signal_cache[cache_key] = (signal, current_mtime)
             return signal
 
         except (json.JSONDecodeError, KeyError, ValueError) as e:
@@ -249,18 +287,20 @@ class TEQABridge:
     def _check_stale(self, timestamp: datetime) -> bool:
         return (datetime.now() - timestamp) > timedelta(minutes=self.staleness_minutes)
 
-    def apply_to_lstm(self, lstm_action: str, lstm_confidence: float) -> Tuple[str, float, float, str]:
+    def apply_to_lstm(self, lstm_action: str, lstm_confidence: float,
+                      symbol: str = None) -> Tuple[str, float, float, str]:
         """
         Combine TEQA quantum signal with LSTM prediction.
 
         Args:
             lstm_action: 'BUY', 'SELL', or 'HOLD' from LSTM
             lstm_confidence: LSTM confidence 0.0-1.0
+            symbol: Optional symbol to look up per-symbol signal file
 
         Returns:
             (action, confidence, lot_multiplier, reason)
         """
-        signal = self.read_signal()
+        signal = self.read_signal(symbol=symbol)
 
         if signal is None:
             return lstm_action, lstm_confidence, 1.0, "TEQA: no signal file"
@@ -313,9 +353,9 @@ class TEQABridge:
 
         return lstm_action, lstm_confidence, 1.0, "TEQA: below threshold"
 
-    def get_status_line(self) -> str:
+    def get_status_line(self, symbol: str = None) -> str:
         """One-line status for dashboard display."""
-        signal = self.read_signal()
+        signal = self.read_signal(symbol=symbol)
         if signal is None:
             return "[TEQA] No signal"
         if signal.is_stale:

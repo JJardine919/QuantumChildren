@@ -660,7 +660,7 @@ class InstantTrader:
             # Apply TEQA quantum signal
             if self.teqa_bridge is not None and action is not None:
                 final_act, final_conf, lot_mult, teqa_reason = \
-                    self.teqa_bridge.apply_to_lstm(action.name, confidence)
+                    self.teqa_bridge.apply_to_lstm(action.name, confidence, symbol=symbol)
                 action_map = {'BUY': Action.BUY, 'SELL': Action.SELL, 'HOLD': Action.HOLD}
                 action = action_map.get(final_act, Action.HOLD)
                 confidence = final_conf

@@ -78,10 +78,14 @@ logs/
 # Runtime data
 *.jsonl
 watchdog_stats.json
+te_quantum_signal*.json
 teqa_analytics/
 
 # Simulation results
 quantum_v2_sim_*.json
+
+# Windows copy/backup duplicates
+* - Copy*
 
 # Non-standard virtual envs
 .venv*/
