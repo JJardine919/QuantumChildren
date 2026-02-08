@@ -48,9 +48,25 @@ from config_loader import (
     TP_MULTIPLIER,
     ROLLING_SL_MULTIPLIER,
     DYNAMIC_TP_PERCENT,
+    SET_DYNAMIC_TP,
+    ROLLING_SL_ENABLED,
     CONFIDENCE_THRESHOLD,
-    CHECK_INTERVAL_SECONDS
+    CHECK_INTERVAL_SECONDS,
+    LSTM_MAX_AGE_DAYS,
 )
+
+# Secure credential loading (H-1: no plaintext passwords)
+from credential_manager import get_credentials, CredentialError
+
+# Pre-launch validation (H-7)
+from prelaunch_validator import validate_prelaunch
+
+# TEQA quantum signal bridge (H-5)
+try:
+    from teqa_bridge import TEQABridge
+    TEQA_ENABLED = True
+except ImportError:
+    TEQA_ENABLED = False
 
 # Configure logging
 logging.basicConfig(
@@ -67,47 +83,22 @@ logging.basicConfig(
 # GETLEVERAGED ACCOUNTS ONLY
 # ============================================================
 
-ACCOUNTS = {
-    'GL_1': {
-        'account': 113326,
-        'password': '%bwN)IvJ5F',
-        'server': 'GetLeveraged-Trade',
-        'terminal_path': None,
-        'name': 'GetLeveraged Account 1',
+def _load_account(account_key: str) -> dict:
+    """Load account config from credential_manager. No plaintext passwords."""
+    creds = get_credentials(account_key)
+    return {
+        'account': creds['account'],
+        'password': creds['password'],
+        'server': creds['server'],
+        'terminal_path': creds.get('terminal_path'),
+        'name': f'GetLeveraged {account_key}',
         'initial_balance': 10000,
         'profit_target': 0.10,
         'daily_loss_limit': 0.05,
         'max_drawdown': 0.10,
-        'symbols': ['BTCUSD', 'XAUUSD', 'ETHUSD'],
-        'magic_number': 113001,
-    },
-    'GL_2': {
-        'account': 113328,
-        'password': 'H*M5c7jpR7',
-        'server': 'GetLeveraged-Trade',
-        'terminal_path': None,
-        'name': 'GetLeveraged Account 2',
-        'initial_balance': 10000,
-        'profit_target': 0.10,
-        'daily_loss_limit': 0.05,
-        'max_drawdown': 0.10,
-        'symbols': ['BTCUSD', 'XAUUSD', 'ETHUSD'],
-        'magic_number': 113002,
-    },
-    'GL_3': {
-        'account': 107245,
-        'password': '$86eCmFbXR',
-        'server': 'GetLeveraged-Trade',
-        'terminal_path': None,
-        'name': 'GetLeveraged Account 3',
-        'initial_balance': 10000,
-        'profit_target': 0.10,
-        'daily_loss_limit': 0.05,
-        'max_drawdown': 0.10,
-        'symbols': ['BTCUSD', 'XAUUSD', 'ETHUSD'],
-        'magic_number': 107001,
-    },
-}
+        'symbols': creds.get('symbols', ['BTCUSD', 'XAUUSD', 'ETHUSD']),
+        'magic_number': creds.get('magic', int(account_key.split('_')[1]) * 1000 + 1),
+    }
 
 
 # ============================================================
@@ -118,11 +109,11 @@ ACCOUNTS = {
 class BrainConfig:
     CLEAN_REGIME_THRESHOLD: float = 0.95
     VOLATILE_REGIME_THRESHOLD: float = 0.85
-    CONFIDENCE_THRESHOLD: float = 0.48
+    CONFIDENCE_THRESHOLD: float = CONFIDENCE_THRESHOLD  # From config_loader, NOT hardcoded
     RISK_PER_TRADE_PCT: float = 0.005
     BARS_FOR_ANALYSIS: int = 256
     SEQUENCE_LENGTH: int = 30
-    CHECK_INTERVAL_SECONDS: int = 60
+    CHECK_INTERVAL_SECONDS: int = CHECK_INTERVAL_SECONDS  # From config_loader
     BASE_LOT: float = 0.01
 
 
@@ -222,6 +213,20 @@ class ExpertLoader:
                 return self._load_expert(expert)
         return None
 
+    def _check_model_staleness(self, model_path: Path):
+        """H-8: Warn if LSTM model file is older than LSTM_MAX_AGE_DAYS."""
+        try:
+            import os
+            mtime = os.path.getmtime(str(model_path))
+            age_days = (time.time() - mtime) / 86400.0
+            if age_days > LSTM_MAX_AGE_DAYS:
+                logging.warning(
+                    f"STALE MODEL: {model_path.name} is {age_days:.1f} days old "
+                    f"(limit: {LSTM_MAX_AGE_DAYS} days). Consider retraining."
+                )
+        except Exception as e:
+            logging.debug(f"Could not check model staleness: {e}")
+
     def _load_expert(self, expert_info: dict) -> Optional[nn.Module]:
         filename = expert_info['filename']
         if filename in self.loaded_experts:
@@ -230,6 +235,9 @@ class ExpertLoader:
         expert_path = self.experts_dir / filename
         if not expert_path.exists():
             return None
+
+        # H-8: Check model staleness before loading
+        self._check_model_staleness(expert_path)
 
         try:
             model = LSTMModel(
@@ -323,6 +331,8 @@ class AccountTrader:
         self.expert_loader = ExpertLoader()
         self.feature_engineer = FeatureEngineer()
         self.starting_balance = 0.0
+        # H-5: TEQA bridge
+        self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
 
     def connect(self) -> bool:
         """Connect ONCE at startup. Called only once — never re-logins."""
@@ -508,21 +518,148 @@ class AccountTrader:
             "type_filling": filling_mode,
         }
 
-        result = mt5.order_send(request)
-        if result.retcode == mt5.TRADE_RETCODE_DONE:
+        try:
+            result = mt5.order_send(request)
+        except Exception as e:
+            logging.error(f"[{self.account_key}] order_send exception: {e}")
+            return False
+        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
             logging.info(f"[{self.account_key}] TRADE: {action.name} {symbol} @ {price:.2f} SL:{sl:.2f} TP:{tp:.2f}")
             return True
         else:
-            logging.error(f"[{self.account_key}] FAILED: {result.comment} ({result.retcode})")
+            logging.error(f"[{self.account_key}] FAILED: {result.comment if result else 'None'} ({result.retcode if result else 'N/A'})")
             return False
+
+    def manage_positions(self):
+        """H-6: Active position management — rolling SL + dynamic TP.
+        Ported from BRAIN_BG_INSTANT.py."""
+        positions = mt5.positions_get()
+        if not positions:
+            return
+
+        for pos in positions:
+            if pos.magic != self.account_config['magic_number']:
+                continue
+
+            symbol_info = mt5.symbol_info(pos.symbol)
+            if symbol_info is None:
+                continue
+
+            tick = mt5.symbol_info_tick(pos.symbol)
+            if tick is None:
+                continue
+
+            digits = symbol_info.digits
+            point = symbol_info.point
+            stops_level = symbol_info.trade_stops_level
+            min_distance = (stops_level + 10) * point
+
+            if pos.type == 0:  # BUY
+                current_price = tick.bid
+                entry_sl_distance = pos.price_open - pos.sl if pos.sl > 0 else 0
+                current_profit_distance = current_price - pos.price_open
+            else:  # SELL
+                current_price = tick.ask
+                entry_sl_distance = pos.sl - pos.price_open if pos.sl > 0 else 0
+                current_profit_distance = pos.price_open - current_price
+
+            if entry_sl_distance <= 0:
+                continue
+
+            tp_target_distance = entry_sl_distance * TP_MULTIPLIER
+            dynamic_tp_threshold = tp_target_distance * (DYNAMIC_TP_PERCENT / 100.0)
+
+            # --- DYNAMIC TP: close at threshold ---
+            if SET_DYNAMIC_TP and current_profit_distance >= dynamic_tp_threshold:
+                close_type = mt5.ORDER_TYPE_SELL if pos.type == 0 else mt5.ORDER_TYPE_BUY
+                close_price = tick.bid if pos.type == 0 else tick.ask
+                request = {
+                    "action": mt5.TRADE_ACTION_DEAL,
+                    "symbol": pos.symbol,
+                    "volume": pos.volume,
+                    "type": close_type,
+                    "position": pos.ticket,
+                    "price": round(close_price, digits),
+                    "magic": self.account_config['magic_number'],
+                    "comment": "DYN_TP",
+                    "type_time": mt5.ORDER_TIME_GTC,
+                    "type_filling": mt5.ORDER_FILLING_IOC,
+                }
+                try:
+                    result = mt5.order_send(request)
+                except Exception as e:
+                    logging.error(f"[{self.account_key}] DYN_TP order_send exception: {e}")
+                    continue
+                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    logging.info(f"[{self.account_key}] DYNAMIC TP: {pos.symbol} #{pos.ticket} | Profit: ${pos.profit:.2f}")
+                continue
+
+            # --- ROLLING SL: trail stop to lock in profit ---
+            if ROLLING_SL_ENABLED and current_profit_distance > 0:
+                rolled_sl_distance = entry_sl_distance / ROLLING_SL_MULTIPLIER
+
+                if pos.type == 0:  # BUY
+                    new_sl = current_price - rolled_sl_distance
+                    new_sl = max(new_sl, pos.price_open)
+                    if new_sl - tick.bid > -min_distance:
+                        new_sl = tick.bid - min_distance
+                    if pos.sl > 0 and new_sl <= pos.sl:
+                        continue
+                    risk_from_sl = current_price - new_sl
+                    new_tp = current_price + (risk_from_sl * TP_MULTIPLIER)
+                    new_tp = max(new_tp, pos.tp) if pos.tp > 0 else new_tp
+                else:  # SELL
+                    new_sl = current_price + rolled_sl_distance
+                    new_sl = min(new_sl, pos.price_open)
+                    if tick.ask - new_sl > -min_distance:
+                        new_sl = tick.ask + min_distance
+                    if pos.sl > 0 and new_sl >= pos.sl:
+                        continue
+                    risk_from_sl = new_sl - current_price
+                    new_tp = current_price - (risk_from_sl * TP_MULTIPLIER)
+                    new_tp = min(new_tp, pos.tp) if pos.tp > 0 else new_tp
+
+                new_sl = round(new_sl, digits)
+                new_tp = round(new_tp, digits)
+
+                if new_sl != round(pos.sl, digits) or new_tp != round(pos.tp, digits):
+                    request = {
+                        "action": mt5.TRADE_ACTION_SLTP,
+                        "symbol": pos.symbol,
+                        "position": pos.ticket,
+                        "sl": new_sl,
+                        "tp": new_tp,
+                    }
+                    try:
+                        result = mt5.order_send(request)
+                    except Exception as e:
+                        logging.error(f"[{self.account_key}] TRAIL order_send exception for {pos.symbol} #{pos.ticket}: {e}")
+                        continue
+                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                        logging.info(f"[{self.account_key}] TRAIL: {pos.symbol} #{pos.ticket} SL -> {new_sl} | TP -> {new_tp}")
 
     def run_cycle(self) -> Dict[str, dict]:
         results = {}
         if not self.check_risk_limits():
             return results
 
+        # H-6: Manage existing positions first (rolling SL + dynamic TP)
+        self.manage_positions()
+
         for symbol in self.account_config['symbols']:
             regime, fidelity, action, confidence = self.analyze_symbol(symbol)
+
+            # H-5: Apply TEQA bridge if available
+            if self.teqa_bridge is not None and action is not None:
+                lstm_action_str = action.name
+                final_action_str, final_conf, lot_mult, teqa_reason = \
+                    self.teqa_bridge.apply_to_lstm(lstm_action_str, confidence, symbol=symbol)
+                action_map = {'BUY': Action.BUY, 'SELL': Action.SELL, 'HOLD': Action.HOLD}
+                action = action_map.get(final_action_str, Action.HOLD)
+                confidence = final_conf
+                if teqa_reason:
+                    logging.info(f"[{self.account_key}][{symbol}] TEQA: {teqa_reason}")
+
             trade_executed = False
             if regime == Regime.CLEAN and action in [Action.BUY, Action.SELL]:
                 trade_executed = self.execute_trade(symbol, action, confidence)
@@ -560,20 +697,36 @@ class AccountTrader:
 # MAIN BRAIN
 # ============================================================
 
+VALID_ACCOUNTS = ['GL_1', 'GL_2', 'GL_3']
+
+
 def run_single_account(account_key: str):
     """Run brain for ONE account only. Never cycles. Never re-logins."""
-    if account_key not in ACCOUNTS:
+    if account_key not in VALID_ACCOUNTS:
         logging.error(f"Unknown account: {account_key}")
-        logging.error(f"Valid accounts: {', '.join(ACCOUNTS.keys())}")
+        logging.error(f"Valid accounts: {', '.join(VALID_ACCOUNTS)}")
+        sys.exit(1)
+
+    # H-1: Load credentials securely
+    try:
+        account_config = _load_account(account_key)
+    except CredentialError as e:
+        logging.error(f"Credential error for {account_key}: {e}")
+        sys.exit(1)
+
+    # H-7: Pre-launch validation
+    if not validate_prelaunch(symbols=account_config['symbols']):
+        logging.error("Pre-launch validation failed. Exiting.")
         sys.exit(1)
 
     config = BrainConfig()
-    account_config = ACCOUNTS[account_key]
     trader = AccountTrader(account_key, account_config, config)
 
     print("=" * 60)
     print(f"  GETLEVERAGED QUANTUM BRAIN — {account_config['name']}")
     print(f"  Account: {account_config['account']} (ONE account, ONE script)")
+    print(f"  SL: ${MAX_LOSS_DOLLARS} | TP: {TP_MULTIPLIER}x | Dynamic TP: {DYNAMIC_TP_PERCENT}%")
+    print(f"  Rolling SL: {ROLLING_SL_MULTIPLIER}x | TEQA: {'ON' if TEQA_ENABLED else 'OFF'}")
     print("=" * 60)
 
     # Connect ONCE at startup — never again
@@ -603,6 +756,9 @@ def run_single_account(account_key: str):
                 status = "TRADED" if data['trade_executed'] else ""
                 print(f"  [{icon}] {symbol}: {data['regime']} | "
                       f"{data['action']} ({data['confidence']:.2f}) {status}")
+
+            if TEQA_ENABLED and trader.teqa_bridge:
+                print(f"  {trader.teqa_bridge.get_status_line()}")
 
             wait_time = config.CHECK_INTERVAL_SECONDS
             print(f"\n  Waiting {wait_time}s...")

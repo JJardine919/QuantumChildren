@@ -1,0 +1,158 @@
+TRADEMARK FILING GUIDE — QUANTUM CHILDREN / AOI
+=================================================
+Prepared: 2026-02-08
+Applicant: James Jardine
+ORCID: 0009-0004-9073-7192
+Zenodo DOI: 10.5281/zenodo.18526575
+
+=================================================
+MARKS TO REGISTER (in priority order)
+=================================================
+
+1. QUANTUM CHILDREN
+   - The primary product name
+   - Most distinctive, easiest to defend
+   - Already has Zenodo DOI timestamp as prior art
+   - FILE THIS FIRST
+
+2. ARTIFICIAL ORGANISM INTELLIGENCE
+   - The category/paradigm name (like "AI" but bio-inspired)
+   - Broad protection for the concept
+   - Highly distinctive — no existing registrations found
+
+3. AOI
+   - Acronym for Artificial Organism Intelligence
+   - Short-form brand for marketing
+   - File alongside #2 as same application if possible
+
+4. TEQA
+   - Transposable Element Quantum Architecture
+   - The engine name
+   - Technical brand for the core computation framework
+
+5. JARDINE'S GATE
+   - The gate filtering system (G1 through G12+)
+   - Named trading methodology
+
+=================================================
+USPTO CLASSES TO FILE
+=================================================
+
+CLASS 9 — Downloadable Computer Software
+-----------------------------------------
+Goods:
+- Downloadable software for bio-inspired adaptive signal processing
+  using transposable element domestication algorithms
+- Downloadable software implementing quantum-inspired circuit
+  computation for multi-signal analysis and pattern recognition
+- Downloadable software for neural somatic mosaicism simulation
+  with Darwinian evolutionary selection
+- Downloadable software for adaptive immune memory systems
+  including pattern matching, recombination, and protective deletion
+- Downloadable software for closed-loop feedback learning systems
+  using biological domestication algorithms
+- Downloadable software for real-time convergent pattern detection
+  across multiple independent data streams
+
+CLASS 42 — Scientific and Technological Services
+-------------------------------------------------
+Services:
+- Software as a service (SaaS) featuring bio-inspired adaptive
+  computation engines
+- Platform as a service (PaaS) for quantum-inspired biological
+  signal processing
+- Scientific research in the field of computational neuroscience
+  and transposable element modeling
+- Design and development of artificial organism computing frameworks
+- Cloud-based data collection and signal entropy monitoring services
+
+CLASS 36 — Financial Services
+-----------------------------
+Services:
+- Financial software for adaptive algorithmic trading using
+  bio-inspired signal processing
+- Software for automated risk management using biological
+  immune system algorithms
+- Financial data analysis software incorporating quantum-inspired
+  computation and evolutionary optimization
+
+CLASS 41 — Education and Training
+----------------------------------
+Services:
+- Providing educational materials in the field of computational
+  biology and bio-inspired computing
+- Online publications relating to transposable element
+  domestication algorithms and artificial organism intelligence
+
+=================================================
+PRODUCT INVENTORY (what the marks cover)
+=================================================
+
+Core Engine:
+  - TEQA v3.0 Engine (33-qubit quantum circuit processor)
+  - TE Domestication Framework (closed-loop pattern learning)
+  - Neural Mosaic (7-neuron evolutionary committee)
+  - Master Train Pipeline (LSTM walk-forward training)
+
+Biological Algorithm Suite:
+  1. V(D)J Recombination Engine (strategy antibody generation)
+  2. Protective Deletion Engine (toxic pattern suppression)
+  3. CRISPR-Cas9 Gate (immune memory trade blocker)
+  4. Electric Organs Engine (cross-instrument convergent evolution)
+  5. KoRV Engine (real-time retroviral domestication)
+  6. Bdelloid Rotifer Engine (horizontal gene transfer)
+  7. Toxoplasma Engine (behavior/regime modification)
+  8. Syncytin Engine (strategy fusion)
+
+Platform:
+  - BRAIN Trading Scripts (MT5 execution bridge)
+  - Signal Farm (multi-account A/B testing)
+  - Quantum Monitor Dashboard (real-time monitoring)
+  - Entropy Collector (signal data collection)
+  - Stoploss Watchdog (safety system)
+  - Config Loader (centralized settings)
+
+=================================================
+FILING DETAILS
+=================================================
+
+Where to file:
+  USPTO TEAS Plus: https://www.uspto.gov/trademarks/apply
+  Cost: $250 per class (TEAS Plus) or $350 per class (TEAS Standard)
+
+Recommended initial filing:
+  - "Quantum Children" in Class 9 + Class 42 = $500
+  - Add Class 36 + 41 later if needed = +$500
+
+Total for full coverage (all 5 marks x 4 classes):
+  - Maximum: 5 marks x 4 classes x $250 = $5,000
+  - Minimum viable: 1 mark x 2 classes = $500
+
+Specimen of use:
+  - Screenshot of quantum-children.com
+  - Screenshot of Zenodo publication page
+  - Screenshot of GitHub repository
+  - Screenshot of software running (TEQA output)
+
+Prior art / evidence of first use:
+  - Zenodo DOI: 10.5281/zenodo.18526575 (published 2026-02-08)
+  - Website: https://quantum-children.com
+  - GitHub repository with commit history
+  - ORCID: 0009-0004-9073-7192
+
+=================================================
+NOTES
+=================================================
+
+- File "Quantum Children" FIRST — it's the strongest mark
+- "Artificial Organism Intelligence" is the big play —
+  it names an entire paradigm
+- AOI acronym should be filed with the full phrase
+- TEAS Plus is cheaper but requires picking from
+  pre-approved descriptions
+- TEAS Standard lets you write custom descriptions
+  (better for novel technology)
+- You have 6 months after filing to submit specimen of use
+  if filing intent-to-use
+
+=================================================

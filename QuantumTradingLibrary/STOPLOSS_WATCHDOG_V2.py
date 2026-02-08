@@ -115,19 +115,23 @@ class StopLossWatchdogV2:
     - Total drawdown monitoring
     """
 
-    # Known magic numbers from the system
-    KNOWN_MAGIC_NUMBERS: Set[int] = {
-        212001,  # ATLAS BRAIN
-        366001,  # BG_INSTANT BRAIN
-        365001,  # BG_CHALLENGE BRAIN
-        113001,  # GL_1
-        113002,  # GL_2
-        107001,  # GL_3
-        888888,  # MCP close
-        999999,  # Watchdog close
-        20251222,  # LSTM live trading
-        20251227,  # Adaptation/SEAL
+    # System magic numbers (non-account, used by infrastructure)
+    SYSTEM_MAGIC_NUMBERS: Set[int] = {
+        888888,   # MCP close
+        999999,   # Watchdog close
+        20251222, # LSTM live trading
+        20251227, # Adaptation/SEAL
     }
+
+    @classmethod
+    def _build_known_magic_numbers(cls) -> Set[int]:
+        """Build known magic numbers from MASTER_CONFIG.json accounts + system magics."""
+        magics = set(cls.SYSTEM_MAGIC_NUMBERS)
+        for acc in ACCOUNTS.values():
+            magic = acc.get('magic')
+            if magic:
+                magics.add(magic)
+        return magics
 
     def __init__(
         self,
@@ -150,6 +154,7 @@ class StopLossWatchdogV2:
         self.events: List[WatchdogEvent] = []
         self.known_tickets: Set[int] = set()  # Track positions we've already seen
         self.sl_applied_tickets: Set[int] = set()  # Track positions we've already fixed
+        self.KNOWN_MAGIC_NUMBERS = self._build_known_magic_numbers()
 
         # Logging setup
         if log_dir is None:

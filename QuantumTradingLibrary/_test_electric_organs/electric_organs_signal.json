@@ -1,0 +1,55 @@
+{
+  "version": "ELECTRIC-ORGANS-1.0",
+  "timestamp": "2026-02-08T13:57:23.583872",
+  "n_lineages": 4,
+  "lineage_symbols": [
+    "XAUUSD",
+    "BTCUSD",
+    "ETHUSD",
+    "NAS100"
+  ],
+  "n_convergent_patterns": 3,
+  "n_electrocytes": 2,
+  "n_suppressors": 1,
+  "electrocytes": [
+    {
+      "hash": "87060714",
+      "combo": "Alu+CACTA+L1_Neuronal",
+      "score": 1.0,
+      "boost": 1.5,
+      "instruments": 4,
+      "avg_wr": 0.72,
+      "avg_pf": 2.1,
+      "independent": true,
+      "lineages": [
+        "XAUUSD",
+        "BTCUSD",
+        "ETHUSD",
+        "NAS100"
+      ]
+    },
+    {
+      "hash": "2c3f4dd1",
+      "combo": "BEL_Pao+DIRS1+Ty3_gypsy",
+      "score": 1.0,
+      "boost": 1.5,
+      "instruments": 3,
+      "avg_wr": 0.72,
+      "avg_pf": 2.1,
+      "independent": true,
+      "lineages": [
+        "XAUUSD",
+        "BTCUSD",
+        "ETHUSD"
+      ]
+    }
+  ],
+  "suppressors": [
+    {
+      "hash": "067c8e2a",
+      "combo": "hobo+Mutator+P_element",
+      "suppress": 0.3,
+      "n_failed": 4
+    }
+  ]
+}

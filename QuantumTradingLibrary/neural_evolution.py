@@ -156,6 +156,17 @@ def genome_fingerprint(neuron: NeuralGenome) -> str:
     return hashlib.md5(raw.encode()).hexdigest()[:12]
 
 
+def population_fingerprint(neurons: List[NeuralGenome]) -> str:
+    """
+    Create a hashable fingerprint of the ENTIRE neural mosaic population.
+    Changes when ANY neuron's genome is modified (evolution event).
+    Used by TEDomesticationTracker to detect topology changes.
+    """
+    individual_fps = sorted(genome_fingerprint(n) for n in neurons)
+    combined = "|".join(individual_fps)
+    return hashlib.md5(combined.encode()).hexdigest()[:16]
+
+
 def genome_similarity(a: NeuralGenome, b: NeuralGenome) -> float:
     """
     Compute similarity between two neuron genomes (0.0 = completely different, 1.0 = identical).

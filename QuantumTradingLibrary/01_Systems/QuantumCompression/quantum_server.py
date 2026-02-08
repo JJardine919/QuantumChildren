@@ -130,7 +130,34 @@ async def get_metrics():
         "trades": 42,
         "win_rate": 0.68,
         "entropy_avg": 0.42,
-        "active_symbol": "BTCUSD"
+        "active_symbol": "BTCUSD",
+        "disclaimer": "Experimental software. Not financial advice. Past signals do not indicate future performance."
+    }
+
+
+@app.get("/api/export")
+async def export_node_data(node_id: str = ""):
+    """Export all data for a specific node ID. GDPR/user data control."""
+    if not node_id:
+        return {"error": "node_id parameter required"}
+    # TODO: Query signal storage for this node_id and return all records
+    return {
+        "node_id": node_id,
+        "status": "not_implemented",
+        "message": "Data export endpoint. Will return all signals for this node when storage backend is wired."
+    }
+
+
+@app.delete("/api/delete")
+async def delete_node_data(node_id: str = ""):
+    """Delete all data for a specific node ID. GDPR right to erasure."""
+    if not node_id:
+        return {"error": "node_id parameter required"}
+    # TODO: Delete all records matching this node_id from storage
+    return {
+        "node_id": node_id,
+        "status": "not_implemented",
+        "message": "Data deletion endpoint. Will purge all signals for this node when storage backend is wired."
     }
 
 @app.websocket("/ws/compress")

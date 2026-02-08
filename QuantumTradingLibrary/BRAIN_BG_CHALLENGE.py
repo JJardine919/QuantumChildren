@@ -62,7 +62,8 @@ from config_loader import (
     ROLLING_SL_ENABLED,
     ATR_MULTIPLIER,
     CHECK_INTERVAL_SECONDS as CHECK_INTERVAL,
-    CONFIDENCE_THRESHOLD
+    CONFIDENCE_THRESHOLD,
+    LSTM_MAX_AGE_DAYS,
 )
 
 # Import credentials securely - passwords from .env file
@@ -212,6 +213,20 @@ class ExpertLoader:
                 self.etare_experts[symbol] = expert
                 logging.info(f"ETARE expert loaded for {symbol} (WR={expert.win_rate*100:.1f}%)")
 
+    def _check_model_staleness(self, model_path: Path):
+        """H-8: Warn if LSTM model file is older than LSTM_MAX_AGE_DAYS."""
+        try:
+            import os
+            mtime = os.path.getmtime(str(model_path))
+            age_days = (time.time() - mtime) / 86400.0
+            if age_days > LSTM_MAX_AGE_DAYS:
+                logging.warning(
+                    f"STALE MODEL: {model_path.name} is {age_days:.1f} days old "
+                    f"(limit: {LSTM_MAX_AGE_DAYS} days). Consider retraining."
+                )
+        except Exception as e:
+            logging.debug(f"Could not check model staleness: {e}")
+
     def _load_experts(self):
         manifest_path = self.experts_dir / "top_50_manifest.json"
         if not manifest_path.exists():
@@ -226,6 +241,8 @@ class ExpertLoader:
             symbol = entry['symbol'].upper()
             model_file = self.experts_dir / entry['filename']
             if model_file.exists():
+                # H-8: Check model staleness before loading
+                self._check_model_staleness(model_file)
                 model = LSTMModel(
                     input_size=entry.get('input_size', 8),
                     hidden_size=entry.get('hidden_size', 128),
@@ -436,7 +453,7 @@ class ChallengeTrader:
             sl_distance = min_sl_distance
 
         # Calculate lot size to keep loss at exactly MAX_LOSS_DOLLARS
-        sl_ticks = sl_distance / tick_size
+        sl_ticks = sl_distance / tick_size if tick_size > 0 else 0
         if tick_value > 0 and sl_ticks > 0:
             lot = MAX_LOSS_DOLLARS / (sl_ticks * tick_value)
         else:
@@ -485,7 +502,11 @@ class ChallengeTrader:
             "type_filling": filling_mode,
         }
 
-        result = mt5.order_send(request)
+        try:
+            result = mt5.order_send(request)
+        except Exception as e:
+            logging.error(f"order_send exception: {e}")
+            return False
         if result and result.retcode == mt5.TRADE_RETCODE_DONE:
             logging.info(f"TRADE: {action.name} {symbol} @ {price:.2f} | SL: ${MAX_LOSS_DOLLARS} | TP: ${MAX_LOSS_DOLLARS * TP_MULTIPLIER} | Dyn TP at {DYNAMIC_TP_PERCENT}%")
             return True
@@ -568,7 +589,11 @@ class ChallengeTrader:
                         "type_time": mt5.ORDER_TIME_GTC,
                         "type_filling": mt5.ORDER_FILLING_IOC,
                     }
-                    result = mt5.order_send(request)
+                    try:
+                        result = mt5.order_send(request)
+                    except Exception as e:
+                        logging.error(f"DYN_TP order_send exception for {pos.symbol} #{pos.ticket}: {e}")
+                        continue
                     if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                         logging.info(f"DYNAMIC TP: Closed {pos.symbol} #{pos.ticket} | Profit: ${pos.profit:.2f}")
                     continue
@@ -612,7 +637,11 @@ class ChallengeTrader:
                         "sl": new_sl,
                         "tp": new_tp,
                     }
-                    result = mt5.order_send(request)
+                    try:
+                        result = mt5.order_send(request)
+                    except Exception as e:
+                        logging.error(f"TRAIL order_send exception for {pos.symbol} #{pos.ticket}: {e}")
+                        continue
                     if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                         logging.info(f"TRAIL: {pos.symbol} #{pos.ticket} SL -> {new_sl:.2f} | TP -> {new_tp:.2f}")
 

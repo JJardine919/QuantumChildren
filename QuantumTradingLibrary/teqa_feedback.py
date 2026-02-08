@@ -9,7 +9,7 @@ Pipeline:
     Trade closes (SL/TP hit) → MT5 deal history
     → match deal to signal (timestamp + symbol + direction + magic)
     → extract active_tes from that signal
-    → TEDomesticationTracker.record_pattern(active_tes, won)
+    → TEDomesticationTracker.record_pattern(active_tes, won, profit)
     → next TEQA cycle's get_boost() returns updated weights
 
 This is the missing feedback loop that turns TEQA from open-loop
@@ -79,12 +79,14 @@ class TradeOutcomePoller:
             self.signal_db_path = signal_history_db_path
 
         # Track which deal tickets we've already processed (avoid double-counting)
+        # Loaded from DB on init so restarts don't cause double-counting
         self._processed_tickets: set = set()
-        # Cap the set size to prevent unbounded memory growth
         self._max_processed = 10000
+        self._load_processed_tickets()
 
         logger.info(f"[FEEDBACK] Initialized | magic={list(self.magic_numbers)} | "
-                     f"lookback={lookback_seconds}s | signal_db={self.signal_db_path}")
+                     f"lookback={lookback_seconds}s | signal_db={self.signal_db_path} | "
+                     f"previously_processed={len(self._processed_tickets)}")
 
     def poll(self) -> List[Dict]:
         """
@@ -109,8 +111,10 @@ class TradeOutcomePoller:
             active_tes = self._match_signal_to_deal(deal)
 
             if active_tes is not None and len(active_tes) > 0:
-                won = deal["profit"] > 0
-                self.tracker.record_pattern(active_tes, won)
+                # Net PnL includes commissions and swap, not just raw profit
+                net_pnl = deal["profit"] + deal.get("commission", 0) + deal.get("swap", 0)
+                won = net_pnl > 0
+                self.tracker.record_pattern(active_tes, won, profit=net_pnl)
 
                 outcome = {
                     "ticket": ticket,
@@ -133,8 +137,9 @@ class TradeOutcomePoller:
                     f"{deal['symbol']} (manual trade or signal expired)"
                 )
 
-            # Mark as processed
+            # Mark as processed (in-memory + persist to DB)
             self._processed_tickets.add(ticket)
+            self._save_processed_ticket(ticket)
 
             # Prevent unbounded growth
             if len(self._processed_tickets) > self._max_processed:
@@ -171,9 +176,15 @@ class TradeOutcomePoller:
             if deal.magic not in self.magic_numbers:
                 continue
 
+            # deal.time is the CLOSE time for DEAL_ENTRY_OUT.
+            # We need the OPEN time to match the signal that triggered entry.
+            # Look up the opening deal via position_id.
+            open_time = self._get_position_open_time(deal.position_id, deal.time)
+
             result.append({
                 "ticket": deal.ticket,
                 "order": deal.order,
+                "position_id": deal.position_id,
                 "symbol": deal.symbol,
                 "type": "BUY" if deal.type == 0 else "SELL",
                 "volume": deal.volume,
@@ -183,10 +194,28 @@ class TradeOutcomePoller:
                 "swap": deal.swap,
                 "magic": deal.magic,
                 "time": datetime.fromtimestamp(deal.time),
+                "open_time": open_time,
                 "time_iso": datetime.fromtimestamp(deal.time).isoformat(),
             })
 
         return result
+
+    def _get_position_open_time(self, position_id: int, close_timestamp: int) -> Optional[datetime]:
+        """
+        Find the open time of a position by looking up its opening order.
+        Uses mt5.history_orders_get(position=...) for direct lookup.
+        Falls back to None if lookup fails (caller uses close_time as fallback).
+        """
+        try:
+            orders = mt5.history_orders_get(position=position_id)
+            if orders:
+                # The earliest order (by time_done) is the opening order
+                opening = min(orders, key=lambda o: o.time_done)
+                return datetime.fromtimestamp(opening.time_done)
+        except Exception as e:
+            logger.debug(f"[FEEDBACK] Failed to find open time for position {position_id}: {e}")
+
+        return None
 
     def _match_signal_to_deal(self, deal: Dict) -> Optional[List[str]]:
         """
@@ -194,14 +223,15 @@ class TradeOutcomePoller:
 
         Matching strategy:
             1. Same symbol
-            2. Signal timestamp within SIGNAL_MATCH_WINDOW_SECONDS before trade open time
+            2. Signal timestamp within SIGNAL_MATCH_WINDOW_SECONDS before trade OPEN time
             3. Direction matches (LONG→BUY, SHORT→SELL)
             4. Gates passed (wouldn't have traded if blocked)
             5. Take the closest match by timestamp
 
         Returns the active_tes list from the matched signal, or None.
         """
-        deal_time = deal["time"]
+        # Use the trade's OPEN time (not close time) to find the triggering signal
+        deal_time = deal.get("open_time") or deal["time"]
         deal_symbol = deal["symbol"]
         # Deal type is the CLOSING side, so the original trade direction is opposite
         # BUY close = was SHORT, SELL close = was LONG
@@ -212,21 +242,20 @@ class TradeOutcomePoller:
         window_end = deal_time.isoformat()
 
         try:
-            conn = sqlite3.connect(self.signal_db_path, timeout=5)
-            conn.row_factory = sqlite3.Row
+            with sqlite3.connect(self.signal_db_path, timeout=5) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.row_factory = sqlite3.Row
 
-            rows = conn.execute("""
-                SELECT timestamp, direction, active_tes, confidence
-                FROM signals
-                WHERE symbol = ?
-                  AND timestamp BETWEEN ? AND ?
-                  AND direction = ?
-                  AND gates_pass = 1
-                ORDER BY timestamp DESC
-                LIMIT 1
-            """, (deal_symbol, window_start, window_end, original_direction)).fetchall()
-
-            conn.close()
+                rows = conn.execute("""
+                    SELECT timestamp, direction, active_tes, confidence
+                    FROM signals
+                    WHERE symbol = ?
+                      AND timestamp BETWEEN ? AND ?
+                      AND direction = ?
+                      AND gates_pass = 1
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                """, (deal_symbol, window_start, window_end, original_direction)).fetchall()
 
             if not rows:
                 return None
@@ -243,6 +272,36 @@ class TradeOutcomePoller:
         except Exception as e:
             logger.warning(f"[FEEDBACK] Signal DB query failed: {e}")
             return None
+
+    def _load_processed_tickets(self):
+        """Load previously processed ticket IDs from DB to survive restarts."""
+        try:
+            with sqlite3.connect(self.signal_db_path, timeout=5) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS processed_tickets (
+                        ticket INTEGER PRIMARY KEY,
+                        processed_at TEXT NOT NULL
+                    )
+                """)
+                conn.commit()
+                rows = conn.execute("SELECT ticket FROM processed_tickets").fetchall()
+                self._processed_tickets = {r[0] for r in rows}
+        except Exception as e:
+            logger.warning(f"[FEEDBACK] Failed to load processed tickets: {e}")
+
+    def _save_processed_ticket(self, ticket: int):
+        """Persist a processed ticket ID to DB."""
+        try:
+            with sqlite3.connect(self.signal_db_path, timeout=5) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute(
+                    "INSERT OR IGNORE INTO processed_tickets (ticket, processed_at) VALUES (?, ?)",
+                    (ticket, datetime.now().isoformat())
+                )
+                conn.commit()
+        except Exception as e:
+            logger.debug(f"[FEEDBACK] Failed to save processed ticket {ticket}: {e}")
 
     def get_stats(self) -> Dict:
         """Get feedback loop stats for dashboard display."""

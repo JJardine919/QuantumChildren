@@ -4,7 +4,24 @@ QUANTUM CHILDREN - ENTROPY COLLECTOR
 Collects trading signals and sends to the QuantumChildren network.
 This data improves the models for everyone.
 
+DATA COLLECTION NOTICE:
+  When enabled, this module sends the following to the collection server:
+    - Trading symbol (e.g. BTCUSD)
+    - Signal direction (BUY/SELL/HOLD)
+    - Confidence score (0.0 - 1.0)
+    - Quantum entropy values
+    - Current price
+    - Timestamp
+    - Anonymous node ID (randomly generated, not linked to your identity)
+
+  NO personal data, account numbers, passwords, balances, or P/L are sent.
+
+  Collection is DISABLED by default. To enable:
+    1. Set "enabled": true in MASTER_CONFIG.json under COLLECTION_SERVER
+    2. Optionally set QC_COLLECTION_API_KEY in .env for authenticated sends
+
 Part of the free QuantumChildren trading system.
+See PRIVACY_POLICY.md for full details.
 """
 
 import json
@@ -16,17 +33,30 @@ from datetime import datetime
 from pathlib import Path
 
 # ============================================================
-# CONFIGURATION
+# CONFIGURATION - loaded from MASTER_CONFIG.json via config_loader
 # ============================================================
 
-# QuantumChildren Collection Server
-COLLECTION_SERVER = "http://203.161.61.61:8888/collect"
+try:
+    from config_loader import COLLECTION_SERVER_URL, COLLECTION_ENABLED
+    _config_loaded = True
+except ImportError:
+    COLLECTION_SERVER_URL = "http://203.161.61.61:8888"
+    COLLECTION_ENABLED = False
+    _config_loaded = False
+
+# API key for authenticated sends (optional, from .env)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / '.env')
+except ImportError:
+    pass
+_API_KEY = os.environ.get('QC_COLLECTION_API_KEY', '')
 
 # Local backup folder
 LOCAL_BACKUP = Path("quantum_data/")
 LOCAL_BACKUP.mkdir(exist_ok=True)
 
-# Generate unique node ID (persisted locally)
+# Generate unique node ID (persisted locally, anonymous)
 NODE_ID_FILE = LOCAL_BACKUP / ".node_id"
 if NODE_ID_FILE.exists():
     NODE_ID = NODE_ID_FILE.read_text().strip()
@@ -34,7 +64,58 @@ else:
     NODE_ID = f"QC_{uuid.uuid4().hex[:12].upper()}"
     NODE_ID_FILE.write_text(NODE_ID)
 
-print(f"[QuantumChildren] Node ID: {NODE_ID}")
+# ============================================================
+# FIRST-RUN DISCLOSURE
+# ============================================================
+
+_DISCLOSURE_FILE = LOCAL_BACKUP / ".collection_disclosed"
+
+def _print_disclosure():
+    """Print data collection notice on first activation."""
+    if _DISCLOSURE_FILE.exists():
+        return
+
+    print()
+    print("=" * 64)
+    print("  QUANTUM CHILDREN - DATA COLLECTION NOTICE")
+    print("=" * 64)
+    print()
+    print("  Collection is NOW ENABLED in your MASTER_CONFIG.json.")
+    print()
+    print("  This system sends the following to the QuantumChildren")
+    print("  collection server when you generate trading signals:")
+    print()
+    print("    - Symbol (e.g. BTCUSD)")
+    print("    - Direction (BUY/SELL/HOLD)")
+    print("    - Confidence score")
+    print("    - Quantum entropy values")
+    print("    - Current price")
+    print("    - Timestamp")
+    print("    - Anonymous node ID")
+    print()
+    print("  NOT sent: account numbers, passwords, balances, P/L,")
+    print("  or any personally identifiable information.")
+    print()
+    print(f"  Server: {COLLECTION_SERVER_URL}")
+    print(f"  Node ID: {NODE_ID}")
+    print()
+    print("  To disable: set COLLECTION_SERVER.enabled = false")
+    print("  in MASTER_CONFIG.json")
+    print()
+    print("  See PRIVACY_POLICY.md for full details.")
+    print("=" * 64)
+    print()
+
+    _DISCLOSURE_FILE.write_text(datetime.utcnow().isoformat())
+
+
+# Print status on import
+if COLLECTION_ENABLED:
+    _print_disclosure()
+    print(f"[QuantumChildren] Collection ENABLED | Node: {NODE_ID}")
+else:
+    print(f"[QuantumChildren] Collection DISABLED (local backup only) | Node: {NODE_ID}")
+
 
 # ============================================================
 # COLLECTION FUNCTIONS
@@ -42,8 +123,8 @@ print(f"[QuantumChildren] Node ID: {NODE_ID}")
 
 def collect_signal(signal_data: dict) -> bool:
     """
-    Collect a trading signal and send to QuantumChildren.
-    Also saves locally as backup.
+    Collect a trading signal. Saves locally always.
+    Only sends to server if COLLECTION_ENABLED is true.
 
     Args:
         signal_data: dict with keys like:
@@ -56,7 +137,7 @@ def collect_signal(signal_data: dict) -> bool:
             - features: list of feature values (optional)
 
     Returns:
-        True if sent successfully, False if saved locally only
+        True if sent successfully (or saved locally if collection disabled)
     """
     # Add metadata
     signal_data['node_id'] = NODE_ID
@@ -70,43 +151,11 @@ def collect_signal(signal_data: dict) -> bool:
     # Local backup (always)
     _save_local(signal_data, 'signals')
 
-    # Send to server
+    # Send to server only if enabled
+    if not COLLECTION_ENABLED:
+        return True  # Saved locally, that's fine
+
     return _send_to_server(signal_data, '/signal')
-
-
-def collect_outcome(ticket: int, symbol: str, outcome: str, pnl: float,
-                    entry_price: float = None, exit_price: float = None) -> bool:
-    """
-    Collect trade outcome for feedback training.
-
-    Args:
-        ticket: Trade ticket number
-        symbol: Trading symbol
-        outcome: "WIN" / "LOSS" / "BREAKEVEN"
-        pnl: Profit/loss amount
-        entry_price: Entry price (optional)
-        exit_price: Exit price (optional)
-
-    Returns:
-        True if sent successfully
-    """
-    outcome_data = {
-        'node_id': NODE_ID,
-        'ticket': ticket,
-        'symbol': symbol,
-        'outcome': outcome,
-        'pnl': pnl,
-        'entry_price': entry_price,
-        'exit_price': exit_price,
-        'timestamp': datetime.utcnow().isoformat(),
-        'version': '1.0'
-    }
-
-    # Local backup
-    _save_local(outcome_data, 'outcomes')
-
-    # Send to server
-    return _send_to_server(outcome_data, '/outcome')
 
 
 def collect_entropy_snapshot(symbol: str, timeframe: str, entropy: float,
@@ -114,6 +163,7 @@ def collect_entropy_snapshot(symbol: str, timeframe: str, entropy: float,
                              regime: str = None, price: float = None) -> bool:
     """
     Collect entropy snapshot for pattern analysis.
+    Only sends to server if COLLECTION_ENABLED is true.
 
     Args:
         symbol: Trading symbol
@@ -139,10 +189,13 @@ def collect_entropy_snapshot(symbol: str, timeframe: str, entropy: float,
         'version': '1.0'
     }
 
-    # Local backup
+    # Local backup (always)
     _save_local(snapshot, 'entropy')
 
-    # Send to server
+    # Send to server only if enabled
+    if not COLLECTION_ENABLED:
+        return True
+
     return _send_to_server(snapshot, '/entropy')
 
 
@@ -163,18 +216,23 @@ def _save_local(data: dict, category: str):
 
 
 def _send_to_server(data: dict, endpoint: str) -> bool:
-    """Send data to collection server"""
+    """Send data to collection server with optional API key auth"""
     try:
-        base_url = COLLECTION_SERVER.replace('/collect', '')
+        base_url = COLLECTION_SERVER_URL.rstrip('/')
         url = base_url + endpoint
+
+        headers = {
+            'X-Node-ID': NODE_ID,
+            'Content-Type': 'application/json'
+        }
+        if _API_KEY:
+            headers['Authorization'] = f'Bearer {_API_KEY}'
+
         response = requests.post(
             url,
             json=data,
             timeout=5,
-            headers={
-                'X-Node-ID': NODE_ID,
-                'Content-Type': 'application/json'
-            }
+            headers=headers
         )
 
         if response.status_code == 200:
@@ -183,10 +241,8 @@ def _send_to_server(data: dict, endpoint: str) -> bool:
             return False
 
     except requests.exceptions.Timeout:
-        print(f"[QuantumChildren] Server timeout: {url}")
         return False
     except requests.exceptions.ConnectionError:
-        print(f"[QuantumChildren] Server unreachable: {url}")
         return False
     except Exception as e:
         print(f"[QuantumChildren] Send error: {e}")
@@ -196,8 +252,13 @@ def _send_to_server(data: dict, endpoint: str) -> bool:
 def sync_local_data():
     """
     Sync any locally saved data that hasn't been sent.
+    Only works if COLLECTION_ENABLED is true.
     Call this periodically or on startup.
     """
+    if not COLLECTION_ENABLED:
+        print("[QuantumChildren] Collection disabled - skipping sync")
+        return 0, 0
+
     synced = 0
     failed = 0
 
@@ -210,12 +271,7 @@ def sync_local_data():
             with open(log_file, 'r') as f:
                 for line in f:
                     data = json.loads(line.strip())
-                    if 'outcome' in data:
-                        if _send_to_server(data, '/outcome'):
-                            synced += 1
-                        else:
-                            failed += 1
-                    elif 'quantum_entropy' in data and 'direction' not in data:
+                    if 'quantum_entropy' in data and 'direction' not in data:
                         if _send_to_server(data, '/entropy'):
                             synced += 1
                         else:
@@ -244,7 +300,7 @@ def sync_local_data():
 
 def get_local_stats():
     """Get stats on locally collected data"""
-    stats = {'signals': 0, 'outcomes': 0, 'entropy': 0}
+    stats = {'signals': 0, 'entropy': 0}
 
     for log_file in LOCAL_BACKUP.glob('*.jsonl'):
         try:
@@ -253,8 +309,6 @@ def get_local_stats():
 
             if 'signals' in log_file.name:
                 stats['signals'] += count
-            elif 'outcomes' in log_file.name:
-                stats['outcomes'] += count
             elif 'entropy' in log_file.name:
                 stats['entropy'] += count
         except:
@@ -269,27 +323,33 @@ def get_local_stats():
 
 __all__ = [
     'collect_signal',
-    'collect_outcome',
     'collect_entropy_snapshot',
     'sync_local_data',
     'get_local_stats',
-    'NODE_ID'
+    'NODE_ID',
+    'COLLECTION_ENABLED'
 ]
 
 
 if __name__ == "__main__":
     print(f"QuantumChildren Entropy Collector")
     print(f"Node ID: {NODE_ID}")
-    print(f"Server: {COLLECTION_SERVER}")
+    print(f"Server: {COLLECTION_SERVER_URL}")
+    print(f"Collection: {'ENABLED' if COLLECTION_ENABLED else 'DISABLED'}")
+    print(f"API Key: {'SET' if _API_KEY else 'NOT SET'}")
     print(f"Local backup: {LOCAL_BACKUP.absolute()}")
 
     stats = get_local_stats()
     print(f"Local data: {stats}")
 
-    # Test connection
-    print("\nTesting server connection...")
-    test_data = {'test': True, 'node_id': NODE_ID}
-    if _send_to_server(test_data, '/ping'):
-        print("Server: ONLINE")
+    if COLLECTION_ENABLED:
+        # Test connection
+        print("\nTesting server connection...")
+        test_data = {'test': True, 'node_id': NODE_ID}
+        if _send_to_server(test_data, '/ping'):
+            print("Server: ONLINE")
+        else:
+            print("Server: OFFLINE (data will be saved locally)")
     else:
-        print("Server: OFFLINE (data will be saved locally)")
+        print("\nCollection is disabled. Enable in MASTER_CONFIG.json to send data.")
+        print("Local backups are always saved regardless of this setting.")

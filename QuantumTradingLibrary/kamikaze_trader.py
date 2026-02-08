@@ -4,6 +4,9 @@ import time
 import sys
 from credential_manager import get_credentials
 
+# Import trading settings from config - DO NOT HARDCODE
+from config_loader import MAX_LOSS_DOLLARS, TP_MULTIPLIER
+
 # --- CONFIG ---
 _creds = get_credentials('FTMO')
 LOGIN = _creds['account']
@@ -62,18 +65,29 @@ def main():
         signal = "HOLD"
         direction = 0
         
+        # Calculate SL/TP from config (MAX_LOSS_DOLLARS, TP_MULTIPLIER)
+        symbol_info = mt5.symbol_info(SYMBOL)
+        tick_value = symbol_info.trade_tick_value if symbol_info else 1.0
+        tick_size = symbol_info.trade_tick_size if symbol_info else 0.01
+        if tick_value > 0 and VOLUME > 0:
+            sl_ticks = MAX_LOSS_DOLLARS / (tick_value * VOLUME)
+            sl_distance = sl_ticks * tick_size
+        else:
+            sl_distance = 50.0
+        tp_distance = sl_distance * TP_MULTIPLIER
+
         if tick.bid > current_open:
             signal = "BUY"
             price = tick.ask
             type_op = mt5.ORDER_TYPE_BUY
-            sl = price - 500.0 # Wide stops
-            tp = price + 1000.0
+            sl = price - sl_distance
+            tp = price + tp_distance
         else:
             signal = "SELL"
             price = tick.bid
             type_op = mt5.ORDER_TYPE_SELL
-            sl = price + 500.0
-            tp = price - 1000.0
+            sl = price + sl_distance
+            tp = price - tp_distance
 
         print_red(f"{SYMBOL} | Open: {current_open} | Current: {tick.bid} | SIGNAL: {signal}")
 

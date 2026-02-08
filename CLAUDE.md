@@ -11,7 +11,7 @@ All trading settings are in `MASTER_CONFIG.json`. **NEVER hardcode values in Pyt
 SL (MAX_LOSS_DOLLARS):    $1.00
 TP_MULTIPLIER:            3
 ROLLING_SL_MULTIPLIER:    1.5
-DYNAMIC_TP_PERCENT:       40
+DYNAMIC_TP_PERCENT:       50
 CONFIDENCE_THRESHOLD:     0.22
 AGENT_SL_MIN:             $0.50
 AGENT_SL_MAX:             $1.00

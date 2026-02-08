@@ -49,7 +49,8 @@ from config_loader import (
     ROLLING_SL_ENABLED,
     CONFIDENCE_THRESHOLD,
     CHECK_INTERVAL_SECONDS,
-    REQUIRE_TRAINED_EXPERT
+    REQUIRE_TRAINED_EXPERT,
+    LSTM_MAX_AGE_DAYS,
 )
 
 # Import credentials securely - passwords from .env file
@@ -123,7 +124,7 @@ ACCOUNTS = _load_atlas_account()
 class BrainConfig:
     CLEAN_REGIME_THRESHOLD: float = 0.95
     VOLATILE_REGIME_THRESHOLD: float = 0.85
-    CONFIDENCE_THRESHOLD: float = 0.48
+    CONFIDENCE_THRESHOLD: float = CONFIDENCE_THRESHOLD  # From config_loader, NOT hardcoded
     RISK_PER_TRADE_PCT: float = 0.005
     BARS_FOR_ANALYSIS: int = 256
     SEQUENCE_LENGTH: int = 30
@@ -228,6 +229,20 @@ class ExpertLoader:
             logging.info(f"Loaded MUTANT expert: {mutant_filename}")
         return model
 
+    def _check_model_staleness(self, model_path: Path):
+        """H-8: Warn if LSTM model file is older than LSTM_MAX_AGE_DAYS."""
+        try:
+            import os
+            mtime = os.path.getmtime(str(model_path))
+            age_days = (time.time() - mtime) / 86400.0
+            if age_days > LSTM_MAX_AGE_DAYS:
+                logging.warning(
+                    f"STALE MODEL: {model_path.name} is {age_days:.1f} days old "
+                    f"(limit: {LSTM_MAX_AGE_DAYS} days). Consider retraining."
+                )
+        except Exception as e:
+            logging.debug(f"Could not check model staleness: {e}")
+
     def _load_expert(self, expert_info: dict) -> Optional[nn.Module]:
         filename = expert_info['filename']
         if filename in self.loaded_experts:
@@ -236,6 +251,9 @@ class ExpertLoader:
         expert_path = self.experts_dir / filename
         if not expert_path.exists():
             return None
+
+        # H-8: Check model staleness before loading
+        self._check_model_staleness(expert_path)
 
         try:
             model = LSTMModel(
@@ -540,7 +558,7 @@ class AccountTrader:
             logging.warning(f"[{self.account_key}][{symbol}] SL distance {sl_distance:.5f} < min {min_sl_distance:.5f}, adjusting")
             sl_distance = min_sl_distance
             # Recalculate lot to maintain max loss limit with wider SL
-            new_sl_ticks = sl_distance / tick_size
+            new_sl_ticks = sl_distance / tick_size if tick_size > 0 else 0
             if tick_value > 0 and new_sl_ticks > 0:
                 new_lot = MAX_LOSS_DOLLARS / (tick_value * new_sl_ticks)
                 new_lot = max(symbol_info.volume_min, new_lot)
@@ -597,12 +615,16 @@ class AccountTrader:
             "type_filling": filling_mode,
         }
 
-        result = mt5.order_send(request)
-        if result.retcode == mt5.TRADE_RETCODE_DONE:
+        try:
+            result = mt5.order_send(request)
+        except Exception as e:
+            logging.error(f"[{self.account_key}] order_send exception: {e}")
+            return False
+        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
             logging.info(f"[{self.account_key}] TRADE: {action.name} {symbol} @ {price:.2f} SL:{sl:.2f} TP:{tp:.2f}")
             return True
         else:
-            logging.error(f"[{self.account_key}] FAILED: {result.comment} ({result.retcode})")
+            logging.error(f"[{self.account_key}] FAILED: {result.comment if result else 'None'} ({result.retcode if result else 'N/A'})")
             return False
 
     def run_cycle(self) -> Dict[str, dict]:

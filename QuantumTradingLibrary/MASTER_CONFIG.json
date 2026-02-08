@@ -16,7 +16,8 @@
         "WATCHDOG_LIMIT": 1.00,
         "CHECK_INTERVAL_SECONDS": 30,
         "ATR_MULTIPLIER": 0.0438,
-        "REQUIRE_TRAINED_EXPERT": true
+        "REQUIRE_TRAINED_EXPERT": true,
+        "LSTM_MAX_AGE_DAYS": 7
     },
 
     "REGIME_DETECTION": {
@@ -95,7 +96,8 @@
 
     "COLLECTION_SERVER": {
         "url": "http://203.161.61.61:8888",
-        "enabled": true
+        "enabled": false,
+        "api_key_env": "QC_COLLECTION_API_KEY"
     },
 
     "NOTES": [

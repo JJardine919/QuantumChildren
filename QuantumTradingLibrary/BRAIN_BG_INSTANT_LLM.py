@@ -411,7 +411,7 @@ def execute_trade(symbol: str, action: Action, confidence: float, reasoning: str
         sl_distance = min_sl_distance
 
     # Lot size: MAX_LOSS_DOLLARS / (sl_ticks * tick_value)
-    sl_ticks = sl_distance / tick_size
+    sl_ticks = sl_distance / tick_size if tick_size > 0 else 0
     if tick_value > 0 and sl_ticks > 0:
         lot = MAX_LOSS_DOLLARS / (sl_ticks * tick_value)
     else:
@@ -461,7 +461,11 @@ def execute_trade(symbol: str, action: Action, confidence: float, reasoning: str
         "type_filling": filling_mode,
     }
 
-    result = mt5.order_send(request)
+    try:
+        result = mt5.order_send(request)
+    except Exception as e:
+        logging.error(f"order_send exception: {e}")
+        return False
     if result and result.retcode == mt5.TRADE_RETCODE_DONE:
         logging.info(
             f"TRADE EXECUTED: {action.name} {symbol} @ {price:.2f} | "
@@ -535,7 +539,11 @@ def manage_positions():
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
-            result = mt5.order_send(request)
+            try:
+                result = mt5.order_send(request)
+            except Exception as e:
+                logging.error(f"DYN_TP order_send exception for {pos.symbol} #{pos.ticket}: {e}")
+                continue
             if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                 logging.info(f"DYNAMIC TP: Closed {pos.symbol} #{pos.ticket} | Profit: ${pos.profit:.2f}")
             continue
@@ -576,7 +584,11 @@ def manage_positions():
                     "sl": new_sl,
                     "tp": new_tp,
                 }
-                result = mt5.order_send(request)
+                try:
+                    result = mt5.order_send(request)
+                except Exception as e:
+                    logging.error(f"TRAIL order_send exception for {pos.symbol} #{pos.ticket}: {e}")
+                    continue
                 if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                     logging.info(f"TRAIL: {pos.symbol} #{pos.ticket} SL -> {new_sl:.2f} | TP -> {new_tp:.2f}")
 

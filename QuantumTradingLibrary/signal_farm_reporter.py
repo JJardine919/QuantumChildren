@@ -25,7 +25,6 @@ logger = logging.getLogger("signal_farm")
 try:
     from entropy_collector import (
         collect_signal,
-        collect_outcome,
         collect_entropy_snapshot,
         NODE_ID,
     )
@@ -146,19 +145,7 @@ class SignalFarmReporter:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Send to collection server
-        if COLLECTOR_AVAILABLE:
-            try:
-                collect_outcome(
-                    ticket=ticket,
-                    symbol=symbol,
-                    outcome=outcome,
-                    pnl=pnl,
-                    entry_price=entry_price,
-                    exit_price=exit_price,
-                )
-            except Exception as e:
-                self.errors += 1
+        # Outcome reporting is local-only (collect_outcome removed — no server endpoint)
 
         # Send to Base44
         self._send_base44(data)

@@ -65,8 +65,12 @@ SHOCK_EXTREME = 3.0   # TRIM28 emergency suppression
 
 # Domestication thresholds
 DOMESTICATION_MIN_TRADES = 20
-DOMESTICATION_MIN_WR = 0.70
+DOMESTICATION_MIN_WR = 0.70        # Promote to domesticated at 70%+ (posterior WR)
+DOMESTICATION_DE_MIN_WR = 0.60     # De-domesticate only below 60% (hysteresis, posterior WR)
 DOMESTICATION_EXPIRY_DAYS = 30
+DOMESTICATION_MIN_PROFIT_FACTOR = 1.5  # avg_win / avg_loss must exceed this to domesticate
+DOMESTICATION_PRIOR_ALPHA = 10     # Beta prior: starts at 50% expectation
+DOMESTICATION_PRIOR_BETA = 10      # Beta(10,10) → needs real evidence to move past 50%
 
 # Speciation correlation thresholds
 SPECIATION_SAME_SPECIES = 0.6    # Gene flow open
@@ -1137,34 +1141,70 @@ class TEDomesticationTracker:
     was domesticated from a Transib transposon.
     """
 
-    def __init__(self, db_path: str = "teqa_domestication.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            self.db_path = str(Path(__file__).parent / "teqa_domestication.db")
+        else:
+            self.db_path = db_path
         self._init_db()
 
     def _init_db(self):
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS domesticated_patterns (
-                    pattern_hash TEXT PRIMARY KEY,
-                    te_combo TEXT,
-                    win_count INTEGER DEFAULT 0,
-                    loss_count INTEGER DEFAULT 0,
-                    win_rate REAL DEFAULT 0.0,
-                    domesticated INTEGER DEFAULT 0,
-                    boost_factor REAL DEFAULT 1.0,
-                    first_seen TEXT,
-                    last_seen TEXT,
-                    last_activated TEXT
-                )
-            """)
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(self.db_path, timeout=5) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS domesticated_patterns (
+                        pattern_hash TEXT PRIMARY KEY,
+                        te_combo TEXT,
+                        win_count INTEGER DEFAULT 0,
+                        loss_count INTEGER DEFAULT 0,
+                        win_rate REAL DEFAULT 0.0,
+                        domesticated INTEGER DEFAULT 0,
+                        boost_factor REAL DEFAULT 1.0,
+                        first_seen TEXT,
+                        last_seen TEXT,
+                        last_activated TEXT,
+                        topology_hash TEXT DEFAULT ''
+                    )
+                """)
+                # Migrate existing DBs: add columns if missing
+                for col_sql in [
+                    "ALTER TABLE domesticated_patterns ADD COLUMN topology_hash TEXT DEFAULT ''",
+                    "ALTER TABLE domesticated_patterns ADD COLUMN avg_win REAL DEFAULT 0.0",
+                    "ALTER TABLE domesticated_patterns ADD COLUMN avg_loss REAL DEFAULT 0.0",
+                    "ALTER TABLE domesticated_patterns ADD COLUMN profit_factor REAL DEFAULT 0.0",
+                    "ALTER TABLE domesticated_patterns ADD COLUMN posterior_wr REAL DEFAULT 0.5",
+                    "ALTER TABLE domesticated_patterns ADD COLUMN total_win_pnl REAL DEFAULT 0.0",
+                    "ALTER TABLE domesticated_patterns ADD COLUMN total_loss_pnl REAL DEFAULT 0.0",
+                ]:
+                    try:
+                        conn.execute(col_sql)
+                    except Exception:
+                        pass  # Column already exists
+                conn.commit()
         except Exception as e:
             log.warning("Domestication DB init failed: %s", e)
 
-    def record_pattern(self, active_tes: List[str], won: bool):
-        """Record which TEs were active before a trade outcome."""
+    def _is_domesticated(self, pattern_hash: str, cursor) -> bool:
+        """Check if a pattern is currently domesticated (for hysteresis)."""
+        cursor.execute(
+            "SELECT domesticated FROM domesticated_patterns WHERE pattern_hash=?",
+            (pattern_hash,)
+        )
+        row = cursor.fetchone()
+        return bool(row and row[0])
+
+    def record_pattern(self, active_tes: List[str], won: bool, profit: float = 0.0):
+        """Record which TEs were active before a trade outcome.
+
+        Uses Bayesian shrinkage (Beta(10,10) prior) to prevent overfitting:
+        with 33 TE families and millions of combos, raw win_rate at 20 trades
+        is statistically unreliable. The posterior mean starts at 50% and
+        requires real evidence to reach the 70% domestication threshold.
+
+        Also requires profit_factor (avg_win / avg_loss) > 1.5 to ensure
+        the pattern isn't just winning often with tiny gains and rare big losses.
+        """
         if not active_tes:
             return
 
@@ -1173,48 +1213,96 @@ class TEDomesticationTracker:
         now = datetime.now().isoformat()
 
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            cursor = conn.cursor()
+            with sqlite3.connect(self.db_path, timeout=5) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                cursor = conn.cursor()
 
-            cursor.execute(
-                "SELECT win_count, loss_count FROM domesticated_patterns WHERE pattern_hash=?",
-                (pattern_hash,)
-            )
-            row = cursor.fetchone()
+                cursor.execute(
+                    "SELECT win_count, loss_count, total_win_pnl, total_loss_pnl "
+                    "FROM domesticated_patterns WHERE pattern_hash=?",
+                    (pattern_hash,)
+                )
+                row = cursor.fetchone()
 
-            if row:
-                win_count = row[0] + (1 if won else 0)
-                loss_count = row[1] + (0 if won else 1)
-                total = win_count + loss_count
-                win_rate = win_count / total if total > 0 else 0
-                domesticated = 1 if total >= DOMESTICATION_MIN_TRADES and win_rate >= DOMESTICATION_MIN_WR else 0
-                boost = 1.0 + (win_rate - 0.5) * 0.5 if domesticated else 1.0
+                if row:
+                    win_count = row[0] + (1 if won else 0)
+                    loss_count = row[1] + (0 if won else 1)
+                    total = win_count + loss_count
+                    win_rate = win_count / total if total > 0 else 0
 
-                cursor.execute("""
-                    UPDATE domesticated_patterns
-                    SET win_count=?, loss_count=?, win_rate=?,
-                        domesticated=?, boost_factor=?, last_seen=?, last_activated=?
-                    WHERE pattern_hash=?
-                """, (win_count, loss_count, win_rate, domesticated, boost,
-                      now, now, pattern_hash))
-            else:
-                cursor.execute("""
-                    INSERT INTO domesticated_patterns
-                    (pattern_hash, te_combo, win_count, loss_count, win_rate,
-                     first_seen, last_seen, last_activated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (pattern_hash, combo,
-                      1 if won else 0, 0 if won else 1,
-                      1.0 if won else 0.0,
-                      now, now, now))
+                    # Accumulate PnL for profit factor calculation
+                    old_win_pnl = row[2] or 0.0
+                    old_loss_pnl = row[3] or 0.0
+                    total_win_pnl = old_win_pnl + (profit if won else 0.0)
+                    total_loss_pnl = old_loss_pnl + (abs(profit) if not won else 0.0)
 
-            conn.commit()
-            conn.close()
+                    # Bayesian posterior mean: Beta(alpha + wins, beta + losses)
+                    # Prior Beta(10,10) = 50% expectation, requires real evidence to shift
+                    posterior_wr = (DOMESTICATION_PRIOR_ALPHA + win_count) / (
+                        DOMESTICATION_PRIOR_ALPHA + DOMESTICATION_PRIOR_BETA + total)
+
+                    # Profit factor: avg_win / avg_loss (guards against tiny-win-big-loss patterns)
+                    avg_win = total_win_pnl / win_count if win_count > 0 else 0.0
+                    avg_loss = total_loss_pnl / loss_count if loss_count > 0 else 0.0
+                    profit_factor = avg_win / avg_loss if avg_loss > 0 else (99.0 if avg_win > 0 else 0.0)
+
+                    # Hysteresis with Bayesian shrinkage + profit factor
+                    was_domesticated = self._is_domesticated(pattern_hash, cursor)
+                    if was_domesticated:
+                        # Already domesticated: revoke if posterior drops below de-domestication
+                        # threshold OR profit factor falls below 1.0 (losses exceed wins)
+                        domesticated = 0 if (posterior_wr < DOMESTICATION_DE_MIN_WR or profit_factor < 1.0) else 1
+                    else:
+                        # Promote: posterior WR >= 70% AND profit factor >= 1.5 AND enough trades
+                        domesticated = 1 if (
+                            total >= DOMESTICATION_MIN_TRADES
+                            and posterior_wr >= DOMESTICATION_MIN_WR
+                            and profit_factor >= DOMESTICATION_MIN_PROFIT_FACTOR
+                        ) else 0
+
+                    # Sigmoid boost uses posterior WR (not raw) for consistency
+                    boost = (1.0 + 0.30 * (1.0 / (1.0 + math.exp(-15 * (posterior_wr - 0.65))))) if domesticated else 1.0
+
+                    cursor.execute("""
+                        UPDATE domesticated_patterns
+                        SET win_count=?, loss_count=?, win_rate=?, posterior_wr=?,
+                            avg_win=?, avg_loss=?, profit_factor=?,
+                            total_win_pnl=?, total_loss_pnl=?,
+                            domesticated=?, boost_factor=?, last_seen=?, last_activated=?
+                        WHERE pattern_hash=?
+                    """, (win_count, loss_count, win_rate, posterior_wr,
+                          avg_win, avg_loss, profit_factor,
+                          total_win_pnl, total_loss_pnl,
+                          domesticated, boost, now, now, pattern_hash))
+                else:
+                    # First occurrence — compute initial posterior and PnL
+                    posterior_wr = (DOMESTICATION_PRIOR_ALPHA + (1 if won else 0)) / (
+                        DOMESTICATION_PRIOR_ALPHA + DOMESTICATION_PRIOR_BETA + 1)
+                    init_win_pnl = profit if won else 0.0
+                    init_loss_pnl = abs(profit) if not won else 0.0
+                    cursor.execute("""
+                        INSERT INTO domesticated_patterns
+                        (pattern_hash, te_combo, win_count, loss_count, win_rate,
+                         posterior_wr, avg_win, avg_loss, profit_factor,
+                         total_win_pnl, total_loss_pnl,
+                         first_seen, last_seen, last_activated)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (pattern_hash, combo,
+                          1 if won else 0, 0 if won else 1,
+                          1.0 if won else 0.0,
+                          posterior_wr,
+                          profit if won else 0.0,
+                          abs(profit) if not won else 0.0,
+                          0.0,  # profit_factor undefined with 1 trade
+                          init_win_pnl, init_loss_pnl,
+                          now, now, now))
+
+                conn.commit()
         except Exception as e:
             log.warning("Domestication record failed: %s", e)
 
     def get_boost(self, active_tes: List[str]) -> float:
-        """Get boost factor for a TE combination if domesticated."""
+        """Get boost factor for a TE combination if domesticated and not expired."""
         if not active_tes:
             return 1.0
 
@@ -1222,16 +1310,28 @@ class TEDomesticationTracker:
         pattern_hash = hashlib.md5(combo.encode()).hexdigest()[:16]
 
         try:
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT boost_factor, domesticated FROM domesticated_patterns WHERE pattern_hash=?",
-                (pattern_hash,)
-            )
-            row = cursor.fetchone()
-            conn.close()
+            with sqlite3.connect(self.db_path, timeout=5) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT boost_factor, domesticated, last_activated "
+                    "FROM domesticated_patterns WHERE pattern_hash=?",
+                    (pattern_hash,)
+                )
+                row = cursor.fetchone()
 
             if row and row[1]:  # domesticated == 1
+                # Enforce expiry: skip patterns older than DOMESTICATION_EXPIRY_DAYS
+                last_activated = row[2]
+                if last_activated:
+                    try:
+                        last_dt = datetime.fromisoformat(last_activated)
+                        age_days = (datetime.now() - last_dt).days
+                        if age_days > DOMESTICATION_EXPIRY_DAYS:
+                            log.debug("Domesticated pattern %s expired (%d days old)", combo, age_days)
+                            return 1.0
+                    except (ValueError, TypeError):
+                        pass
                 return float(row[0])
         except Exception:
             pass
@@ -1350,7 +1450,7 @@ class TEQAv3Engine:
         self,
         n_neurons: int = DEFAULT_N_NEURONS,
         shots: int = DEFAULT_SHOTS,
-        db_path: str = "teqa_domestication.db",
+        db_path: str = None,
         analytics_dir: str = "teqa_analytics",
         enable_evolution: bool = True,
         genome_file: str = None,
@@ -1517,7 +1617,8 @@ class TEQAv3Engine:
         consensus_dir, consensus_score, vote_counts = self.mosaic.compute_consensus()
 
         # === Step 7: TE Domestication Boost ===
-        active_tes = [a["te"] for a in adjusted_activations if a["strength"] > 0.5]
+        active_tes = [a["te"] for a in adjusted_activations if a["strength"] > 0.3]
+        self._last_active_tes = active_tes  # stash for record_trade_outcome()
         domestication_boost = self.domestication.get_boost(active_tes)
 
         # === Step 8: Compute Final Signal ===
@@ -1543,7 +1644,7 @@ class TEQAv3Engine:
             direction = 0
 
         # Confidence: blend of concordance, consensus, and domestication
-        raw_confidence = concordance * 0.4 + consensus_score * 0.4 + min(0.2, (domestication_boost - 1.0))
+        raw_confidence = concordance * 0.3 + consensus_score * 0.3 + min(0.4, (domestication_boost - 1.0))
         confidence = float(np.clip(raw_confidence, 0.0, 1.0))
 
         # Apply quantum novelty adjustment
@@ -1648,9 +1749,16 @@ class TEQAv3Engine:
 
         return result
 
-    def record_trade_outcome(self, active_tes: List[str], won: bool):
-        """Record a trade outcome for TE domestication learning."""
-        self.domestication.record_pattern(active_tes, won)
+    def record_trade_outcome(self, won: bool, profit: float = 0.0, active_tes: List[str] = None):
+        """Record a trade outcome for TE domestication learning.
+
+        If active_tes is None, uses the TEs from the most recent analyze() call.
+        """
+        tes = active_tes if active_tes is not None else getattr(self, '_last_active_tes', [])
+        if not tes:
+            log.debug("record_trade_outcome: no active TEs to record")
+            return
+        self.domestication.record_pattern(tes, won, profit=profit)
 
     def feed_market_direction(self, actual_direction: int) -> Optional[Dict]:
         """

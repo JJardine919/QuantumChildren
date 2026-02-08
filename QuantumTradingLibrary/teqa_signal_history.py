@@ -33,6 +33,7 @@ class SignalHistoryDB:
 
     def _init_db(self):
         conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,7 +107,8 @@ class SignalHistoryDB:
 
             vote_counts = neural.get("vote_counts", {})
 
-            conn = sqlite3.connect(self.db_path)
+            conn = sqlite3.connect(self.db_path, timeout=5)
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""
                 INSERT INTO signals (
                     timestamp, symbol, direction, direction_str, confidence,

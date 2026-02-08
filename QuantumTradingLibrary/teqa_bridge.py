@@ -341,14 +341,16 @@ class TEQABridge:
         # Case 1: LSTM has a signal — check concordance
         if lstm_action in ('BUY', 'SELL'):
             if lstm_action == teqa_action:
-                # Concordant: boost confidence, apply lot scale
-                boost = signal.confidence * 0.15 * consensus_weight
+                # Concordant: boost confidence, apply domestication lot scale
+                boost = signal.confidence * 0.30 * consensus_weight
                 boosted = min(1.0, lstm_confidence + boost)
+                # lot_scale comes from domestication_boost via TEQA engine
+                lot_mult = max(signal.lot_scale, signal.domestication_boost)
                 reason = (f"TEQA: concordant {teqa_action} "
                           f"({signal.confidence:.1%}, consensus={signal.consensus_score:.1%}, "
-                          f"novelty={signal.novelty:.2f})")
+                          f"novelty={signal.novelty:.2f}, dom_boost={signal.domestication_boost:.2f})")
                 logger.info(f"[TEQA] {reason}")
-                return lstm_action, boosted, signal.lot_scale, reason
+                return lstm_action, boosted, lot_mult, reason
             else:
                 # Discordant: reduce LSTM confidence
                 penalty = signal.confidence * 0.3 * consensus_weight
@@ -363,10 +365,12 @@ class TEQABridge:
 
         # Case 2: LSTM says HOLD but TEQA has strong signal
         if signal.confidence >= CONFIDENCE_THRESHOLD and not signal.is_blocked:
+            lot_mult = max(signal.lot_scale, signal.domestication_boost)
             reason = (f"TEQA: quantum override >> {teqa_action} "
-                      f"({signal.confidence:.1%}, shock={signal.shock_label})")
+                      f"({signal.confidence:.1%}, shock={signal.shock_label}, "
+                      f"dom_boost={signal.domestication_boost:.2f})")
             logger.info(f"[TEQA] {reason}")
-            return teqa_action, signal.confidence, signal.lot_scale, reason
+            return teqa_action, signal.confidence, lot_mult, reason
 
         return lstm_action, lstm_confidence, 1.0, "TEQA: below threshold"
 

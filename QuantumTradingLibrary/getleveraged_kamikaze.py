@@ -4,6 +4,9 @@ import time
 import sys
 from credential_manager import get_credentials, CredentialError
 
+# Import trading settings from config - DO NOT HARDCODE
+from config_loader import MAX_LOSS_DOLLARS, TP_MULTIPLIER
+
 # --- GETLEVERAGED CONFIG ---
 # Load credentials from credential_manager
 try:
@@ -145,16 +148,23 @@ def main():
                 elif (s_info.filling_mode & 1) != 0:
                     fill_mode = mt5.ORDER_FILLING_FOK
 
-            # --- RISK MANAGEMENT ---
-            # User Goal: 50 cents risk per trade.
-            # Volume: 0.01
-            # Math: $0.50 / 0.01 = $50.00 Price Distance
-            SL_DISTANCE = 50.0 # BTCUSD Price Points
+            # --- RISK MANAGEMENT (from config_loader) ---
+            symbol_info = mt5.symbol_info(SYMBOL)
+            tick_value = symbol_info.trade_tick_value if symbol_info else 1.0
+            tick_size = symbol_info.trade_tick_size if symbol_info else 0.01
+            if tick_value > 0 and VOLUME > 0:
+                sl_ticks = MAX_LOSS_DOLLARS / (tick_value * VOLUME)
+                SL_DISTANCE = sl_ticks * tick_size
+            else:
+                SL_DISTANCE = 50.0  # Fallback only
+            TP_DISTANCE = SL_DISTANCE * TP_MULTIPLIER
 
             if action == mt5.ORDER_TYPE_BUY:
                 sl = price - SL_DISTANCE
+                tp = price + TP_DISTANCE
             else:
                 sl = price + SL_DISTANCE
+                tp = price - TP_DISTANCE
 
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
@@ -163,6 +173,7 @@ def main():
                 "type": action,
                 "price": price,
                 "sl": sl,
+                "tp": tp,
                 "magic": MAGIC,
                 "comment": "REVENGE_V1_SL",
                 "type_time": mt5.ORDER_TIME_GTC,

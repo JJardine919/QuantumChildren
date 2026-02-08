@@ -69,6 +69,8 @@ logs/
 
 # Databases (runtime)
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
 
 # Trained models (too large, use releases instead)
