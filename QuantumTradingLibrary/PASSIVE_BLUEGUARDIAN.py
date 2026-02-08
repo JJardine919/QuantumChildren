@@ -6,6 +6,7 @@ import MetaTrader5 as mt5
 import time
 from datetime import datetime
 import pandas as pd
+from credential_manager import get_credentials, CredentialError
 
 # Add the project modules to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,11 +22,14 @@ except ImportError:
 # CONFIGURATION - BLUE GUARDIAN $100K CHALLENGE
 # ==============================================================================
 
+# Load credentials from credential_manager
+bg_creds = get_credentials('BG_CHALLENGE')
+
 CONFIG = {
-    'account': 365060,
-    'password': ')8xaE(gAuU',
-    'server': 'BlueGuardian-Server',
-    'terminal_path': r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe",
+    'account': bg_creds['account'],
+    'password': bg_creds['password'],
+    'server': bg_creds['server'],
+    'terminal_path': bg_creds['terminal_path'],
 
     'symbol': 'BTCUSD',
     'timeframe': mt5.TIMEFRAME_M5,

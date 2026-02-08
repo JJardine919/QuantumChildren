@@ -40,6 +40,9 @@ import torch
 import torch.nn as nn
 import MetaTrader5 as mt5
 
+# Import credential manager
+from credential_manager import get_credentials, get_password, CredentialError
+
 # Add systems path
 sys.path.insert(0, str(Path(__file__).parent / "01_Systems" / "QuantumCompression" / "utils"))
 
@@ -74,11 +77,22 @@ logging.basicConfig(
 # ACCOUNT CONFIGURATIONS
 # ============================================================
 
+# ============================================================
+# ACCOUNT CONFIGURATIONS - Passwords loaded from credential_manager
+# ============================================================
+
+def _load_account_password(key_mapping: str) -> str:
+    """Load password from credential_manager, return empty string if not found"""
+    try:
+        return get_password(key_mapping)
+    except CredentialError:
+        return ''
+
 ACCOUNTS = {
     # BlueGuardian Accounts
     'BG_5K_INSTANT': {
         'account': 366592,
-        'password': '',  # Will auto-login from saved credentials
+        'password': _load_account_password('BG_INSTANT'),
         'server': 'BlueGuardian-Server',
         'terminal_path': r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe",
         'name': 'BlueGuardian $5K Instant',
@@ -93,7 +107,7 @@ ACCOUNTS = {
     },
     'BG_100K_CHALLENGE': {
         'account': 365060,
-        'password': ')8xaE(gAuU',
+        'password': _load_account_password('BG_CHALLENGE'),
         'server': 'BlueGuardian-Server',
         'terminal_path': r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe",
         'name': 'BlueGuardian $100K Challenge',
@@ -110,7 +124,7 @@ ACCOUNTS = {
     # GetLeveraged Accounts
     'GL_ACCOUNT_1': {
         'account': 113326,
-        'password': '',
+        'password': _load_account_password('GL_1'),
         'server': 'GetLeveraged-Server',
         'terminal_path': r"C:\Program Files\GetLeveraged MT5 Terminal\terminal64.exe",
         'name': 'GetLeveraged Account 1',
@@ -125,7 +139,7 @@ ACCOUNTS = {
     },
     'GL_ACCOUNT_2': {
         'account': 113328,
-        'password': '',
+        'password': _load_account_password('GL_2'),
         'server': 'GetLeveraged-Server',
         'terminal_path': r"C:\Program Files\GetLeveraged MT5 Terminal\terminal64.exe",
         'name': 'GetLeveraged Account 2',
@@ -140,7 +154,7 @@ ACCOUNTS = {
     },
     'GL_ACCOUNT_3': {
         'account': 107245,
-        'password': '',
+        'password': _load_account_password('GL_3'),
         'server': 'GetLeveraged-Server',
         'terminal_path': r"C:\Program Files\GetLeveraged MT5 Terminal\terminal64.exe",
         'name': 'GetLeveraged Account 3',
@@ -157,7 +171,7 @@ ACCOUNTS = {
     # Atlas Funded
     'ATLAS': {
         'account': 212000584,
-        'password': '',
+        'password': _load_account_password('ATLAS'),
         'server': 'AtlasFunded-Server',
         'terminal_path': r"C:\Program Files\Atlas Funded MT5 Terminal\terminal64.exe",
         'name': 'Atlas Funded',
@@ -171,7 +185,7 @@ ACCOUNTS = {
         'magic_number': 212001,
     },
 
-    # ETARE QuantumFusion
+    # ETARE QuantumFusion (no credential_manager key, keep empty)
     'ETARE': {
         'account': 1512287880,
         'password': '',

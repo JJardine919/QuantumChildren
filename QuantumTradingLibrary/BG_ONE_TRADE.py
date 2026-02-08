@@ -4,12 +4,19 @@ Just connects and places ONE BUY. That's it.
 """
 
 import MetaTrader5 as mt5
+from credential_manager import get_credentials, CredentialError
 
-# Blue Guardian $5K
-ACCOUNT = 366604
-PASSWORD = 'YF^oHH&4Nm'
-SERVER = 'BlueGuardian-Server'
-TERMINAL = r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe"
+# Blue Guardian $5K - Load from credential_manager
+try:
+    _creds = get_credentials('BG_INSTANT')
+    ACCOUNT = _creds['account']
+    PASSWORD = _creds['password']
+    SERVER = _creds['server']
+    TERMINAL = _creds['terminal_path']
+except CredentialError as e:
+    print(f"ERROR: Could not load BG_INSTANT credentials: {e}")
+    print("Set BG_INSTANT_PASSWORD in .env file or environment")
+    exit(1)
 
 print("=" * 50)
 print("BLUE GUARDIAN - ONE TRADE TEST")

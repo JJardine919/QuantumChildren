@@ -21,6 +21,8 @@ import time
 from datetime import datetime, timedelta
 import logging
 
+from credential_manager import get_credentials, CredentialError
+
 # Logging setup
 logging.basicConfig(
     level=logging.INFO,
@@ -35,27 +37,40 @@ log = logging.getLogger(__name__)
 # ==============================================================================
 # CONFIGURATION - BLUE GUARDIAN $100K CHALLENGE
 # ==============================================================================
-CONFIG = {
-    'account': 366592,
-    'password': 'YOUR_PASSWORD_HERE',  # TODO: Fill this in
-    'server': 'BlueGuardian-Server',
-    'terminal_path': r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe",
+def load_config():
+    """Load configuration with credentials from credential_manager"""
+    try:
+        creds = get_credentials('BG_INSTANT')
+        password = creds['password']
+        terminal_path = creds.get('terminal_path', r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe")
+    except CredentialError as e:
+        log.error(f"Failed to load credentials: {e}")
+        password = ''
+        terminal_path = r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe"
 
-    'symbol': 'BTCUSD',
-    'timeframe': mt5.TIMEFRAME_M5,
-    'magic_number': 366001,
+    return {
+        'account': 366592,
+        'password': password,
+        'server': 'BlueGuardian-Server',
+        'terminal_path': terminal_path,
 
-    # Risk management
-    'volume': 0.01,
-    'atr_multiplier': 1.5,
-    'tp_ratio': 3.0,
-    'be_percent': 0.5,
+        'symbol': 'BTCUSD',
+        'timeframe': mt5.TIMEFRAME_M5,
+        'magic_number': 366001,
 
-    # Compression filter (THE KEY EDGE)
-    'compression_window': 256,
-    'compression_threshold': 1.3,  # Only trade above this
-    'confidence_threshold': 0.6,
-}
+        # Risk management
+        'volume': 0.01,
+        'atr_multiplier': 1.5,
+        'tp_ratio': 3.0,
+        'be_percent': 0.5,
+
+        # Compression filter (THE KEY EDGE)
+        'compression_window': 256,
+        'compression_threshold': 1.3,  # Only trade above this
+        'confidence_threshold': 0.6,
+    }
+
+CONFIG = load_config()
 
 
 def compression_ratio(prices):

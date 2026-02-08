@@ -16,29 +16,45 @@ import MetaTrader5 as mt5
 import time
 import random
 from datetime import datetime
+from credential_manager import get_credentials, CredentialError
 
 # ==============================================================================
 # BLUE GUARDIAN ACCOUNTS - PICK ONE OR BOTH
 # ==============================================================================
 
-ACCOUNTS = [
-    {
-        'account': 366604,
-        'password': 'YF^oHH&4Nm',
-        'server': 'BlueGuardian-Server',
-        'terminal': r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe",
-        'magic': 366001,
-        'name': 'BG $5K Instant',
-    },
-    {
-        'account': 365060,
-        'password': ')8xaE(gAuU',
-        'server': 'BlueGuardian-Server',
-        'terminal': r"C:\Program Files\Blue Guardian MT5 Terminal 2\terminal64.exe",
-        'magic': 365001,
-        'name': 'BG $100K Challenge',
-    },
-]
+def get_accounts():
+    """Load accounts with credentials from credential_manager"""
+    accounts = []
+
+    try:
+        bg_instant = get_credentials('BG_INSTANT')
+        accounts.append({
+            'account': bg_instant['account'],
+            'password': bg_instant['password'],
+            'server': bg_instant['server'],
+            'terminal': bg_instant['terminal_path'],
+            'magic': bg_instant['magic'],
+            'name': 'BG $5K Instant',
+        })
+    except CredentialError as e:
+        print(f"Warning: BG_INSTANT credentials not available: {e}")
+
+    try:
+        bg_challenge = get_credentials('BG_CHALLENGE')
+        accounts.append({
+            'account': bg_challenge['account'],
+            'password': bg_challenge['password'],
+            'server': bg_challenge['server'],
+            'terminal': bg_challenge['terminal_path'],
+            'magic': bg_challenge['magic'],
+            'name': 'BG $100K Challenge',
+        })
+    except CredentialError as e:
+        print(f"Warning: BG_CHALLENGE credentials not available: {e}")
+
+    return accounts
+
+ACCOUNTS = get_accounts()
 
 # Trading settings - ATLAS STYLE
 SYMBOL = 'BTCUSD'

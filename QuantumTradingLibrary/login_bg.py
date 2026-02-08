@@ -2,11 +2,18 @@
 # Blue Guardian Login Script
 import MetaTrader5 as mt5
 import sys
+from credential_manager import get_credentials, CredentialError
 
-# Login details
-LOGIN = 365060
-PASSWORD = ")8xaE(gAuU"
-SERVER = "BlueGuardian-Server"
+# Login details - load from credential_manager
+try:
+    _creds = get_credentials('BG_CHALLENGE')
+    LOGIN = _creds['account']
+    PASSWORD = _creds['password']
+    SERVER = _creds['server']
+except CredentialError as e:
+    print(f"ERROR: Could not load BG_CHALLENGE credentials: {e}")
+    print("Set BG_CHALLENGE_PASSWORD in .env file or environment")
+    sys.exit(1)
 
 if not mt5.initialize():
     print(f"FAILED to init MT5: {mt5.last_error()}")

@@ -1,10 +1,12 @@
 import MetaTrader5 as mt5
 import time
+from credential_manager import get_credentials, CredentialError
 
 # --- CONFIG FOR GETLEVERAGED #1 (113326) ---
-ACCOUNT = 113326
-PASSWORD = '%bwN)IvJ5F'
-SERVER = 'GetLeveraged-Trade'
+creds = get_credentials('GL_1')
+ACCOUNT = creds['account']
+PASSWORD = creds['password']
+SERVER = creds['server']
 SYMBOL = "BTCUSD"
 VOLUME = 0.01
 MAGIC = 7771  # Unique Magic

@@ -6,6 +6,7 @@ import MetaTrader5 as mt5
 import time
 from datetime import datetime
 import pandas as pd
+from credential_manager import get_credentials, CredentialError
 
 # Add the project modules to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,24 +22,27 @@ except ImportError:
 # CONFIGURATION - ATLAS FUNDED #1 (84)
 # ==============================================================================
 
+# Load credentials from credential_manager
+atlas_creds = get_credentials('ATLAS')
+
 CONFIG = {
-    'account': 212000584,
-    'password': 'M6NLk79MN@',
-    'server': 'AtlasFunded-Server',
-    'terminal_path': r"C:\Program Files\Atlas Funded MT5 Terminal\terminal64.exe",
-    
+    'account': atlas_creds['account'],
+    'password': atlas_creds['password'],
+    'server': atlas_creds['server'],
+    'terminal_path': atlas_creds['terminal_path'],
+
     'symbol': 'BTCUSD',
     'timeframe': mt5.TIMEFRAME_M5,
     'magic_number': 84001,
-    
+
     'volume': 0.01,
     'risk_multiplier': 1.5, # SL = 1.5x ATR
     'tp_ratio': 3.0,        # TP = 3x SL (1:3 RR)
     'be_percent': 0.5,      # Move to Break-Even at 50% of TP progress
-    
+
     # Fusion Veto
     'fusion_config': os.path.join(script_dir, 'ETARE_QuantumFusion', 'config', 'config.yaml'),
-    'veto_threshold': 0.15, 
+    'veto_threshold': 0.15,
 }
 
 def log(msg):

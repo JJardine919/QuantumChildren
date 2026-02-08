@@ -2,28 +2,37 @@
 import MetaTrader5 as mt5
 import time
 import sys
+from credential_manager import get_credentials, CredentialError
 
 # --- GETLEVERAGED CONFIG ---
+# Load credentials from credential_manager
+try:
+    gl1_creds = get_credentials('GL_1')
+    gl2_creds = get_credentials('GL_2')
+except CredentialError as e:
+    print(f"Error loading credentials: {e}")
+    sys.exit(1)
+
 ACCOUNTS = {
-    113326: {
-        "password": "%bwN)IvJ5F",
-        "server": "GetLeveraged-Trade",
+    gl1_creds['account']: {
+        "password": gl1_creds['password'],
+        "server": gl1_creds['server'],
         "volume": 0.01,
-        "magic": 777
+        "magic": gl1_creds['magic']
     },
-    113328: {
-        "password": "H*M5c7jpR7",
-        "server": "GetLeveraged-Trade",
+    gl2_creds['account']: {
+        "password": gl2_creds['password'],
+        "server": gl2_creds['server'],
         "volume": 0.05,
-        "magic": 778
+        "magic": gl2_creds['magic']
     }
 }
 
 # Defaults
-DEFAULT_LOGIN = 113326
+DEFAULT_LOGIN = gl1_creds['account']
 SYMBOL = "BTCUSD"
 
-def print_red(msg): 
+def print_red(msg):
     print(f"GETLEVERAGED_KAMIKAZE >> {msg}")
     try:
         with open("kamikaze.log", "a") as f:
@@ -34,7 +43,7 @@ def print_red(msg):
 def ensure_login():
     """Smart login that avoids re-logging if already connected."""
     current_account = mt5.account_info()
-    
+
     if current_account:
         print_red(f"Current Terminal Login: {current_account.login}")
         if current_account.login in ACCOUNTS:
@@ -42,22 +51,22 @@ def ensure_login():
             return current_account.login
         else:
             print_red(f"Account {current_account.login} is not in our GetLeveraged list. Switching...")
-    
+
     # Needs login
     target = DEFAULT_LOGIN
     creds = ACCOUNTS[target]
-    
+
     print_red(f"Logging into GetLeveraged Account {target}...")
     if not mt5.login(target, password=creds["password"], server=creds["server"]):
         print_red(f"Login Failed: {mt5.last_error()}")
         return None
-        
+
     return target
 
 def main():
     # FORCE PATH to GetLeveraged Terminal
     GL_PATH = r"C:\Program Files\GetLeveraged MT5 Terminal\terminal64.exe"
-    
+
     if not mt5.initialize(path=GL_PATH):
         print_red(f"Init Failed (Path: {GL_PATH}): {mt5.last_error()}")
         # Try default init if path fails
@@ -81,13 +90,13 @@ def main():
     MAGIC = config["magic"]
 
     print_red(f"RUNNING ON ACCOUNT {login_id} | Magic: {MAGIC} | Vol: {VOLUME}")
-    
+
     # Force symbol selection
     if not mt5.symbol_select(SYMBOL, True):
         print_red(f"Failed to select {SYMBOL}. Attempting to continue anyway...")
 
     print_red("monitoring market...")
-    
+
     iters = 0
     while True:
         iters += 1
@@ -111,7 +120,7 @@ def main():
             action = mt5.ORDER_TYPE_SELL
             price = tick.bid
             label = "SELL"
-            
+
         # Heartbeat every ~10s
         if iters % 10 == 0:
             print_red(f"Alive | {SYMBOL} | Bid: {tick.bid} | Open: {current_open} | Action: {label}")
@@ -119,34 +128,34 @@ def main():
         # Check existing
         pos = mt5.positions_get(symbol=SYMBOL)
         if pos is None: pos = [] # Safety
-        
+
         # Filter positions by magic number to avoid messing with other strats/manual trades
         my_pos = [p for p in pos if p.magic == MAGIC]
 
         if len(my_pos) == 0:
             print_red(f"FIRE: {label} @ {price} (Bid: {tick.bid}, Open: {current_open})")
-            
+
             # Determine filling mode
             fill_mode = mt5.ORDER_FILLING_FOK # Default safer
             s_info = mt5.symbol_info(SYMBOL)
             if s_info:
                 # If specifically allows IOC, use it (often better for market)
-                if (s_info.filling_mode & 2) != 0: 
+                if (s_info.filling_mode & 2) != 0:
                     fill_mode = mt5.ORDER_FILLING_IOC
                 elif (s_info.filling_mode & 1) != 0:
                     fill_mode = mt5.ORDER_FILLING_FOK
-            
+
             # --- RISK MANAGEMENT ---
             # User Goal: 50 cents risk per trade.
             # Volume: 0.01
             # Math: $0.50 / 0.01 = $50.00 Price Distance
             SL_DISTANCE = 50.0 # BTCUSD Price Points
-            
+
             if action == mt5.ORDER_TYPE_BUY:
                 sl = price - SL_DISTANCE
             else:
                 sl = price + SL_DISTANCE
-            
+
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": SYMBOL,
@@ -157,7 +166,7 @@ def main():
                 "magic": MAGIC,
                 "comment": "REVENGE_V1_SL",
                 "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": fill_mode, 
+                "type_filling": fill_mode,
                 "deviation": 50, # Slippage tolerance
             }
             res = mt5.order_send(request)
@@ -168,7 +177,7 @@ def main():
         else:
             # print_red(f"Holding {label}. PnL: {my_pos[0].profit}")
             pass
-        
+
         time.sleep(1) # Reduced sleep for better response
 
 if __name__ == "__main__":

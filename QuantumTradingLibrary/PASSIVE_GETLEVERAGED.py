@@ -1,12 +1,13 @@
 import MetaTrader5 as mt5
 import time
 import sys
+from credential_manager import get_credentials, CredentialError
 
-# --- GETLEVERAGED ACCOUNTS ---
+# --- GETLEVERAGED ACCOUNTS (passwords loaded from credential_manager) ---
 GL_ACCOUNTS = {
-    1: {'account': 113326, 'password': '%bwN)IvJ5F', 'server': 'GetLeveraged-Trade'},
-    2: {'account': 113328, 'password': 'H*M5c7jpR7', 'server': 'GetLeveraged-Trade'},
-    3: {'account': 107245, 'password': '$86eCmFbXR', 'server': 'GetLeveraged-Trade'},
+    1: 'GL_1',
+    2: 'GL_2',
+    3: 'GL_3',
 }
 
 # --- CONFIG ---
@@ -35,8 +36,15 @@ def main():
         log(f"Invalid account number. Use 1, 2, or 3")
         return
 
-    acct = GL_ACCOUNTS[acct_num]
-    log(f"Using GetLeveraged Account {acct_num}: {acct['account']}")
+    # Get credentials from credential_manager
+    account_key = GL_ACCOUNTS[acct_num]
+    try:
+        creds = get_credentials(account_key)
+    except CredentialError as e:
+        log(f"Credential error: {e}")
+        return
+
+    log(f"Using GetLeveraged Account {acct_num}: {creds['account']}")
 
     # Initialize MT5 (works if already running)
     if not mt5.initialize():
@@ -45,7 +53,7 @@ def main():
         return
 
     # Login to specific account
-    if not mt5.login(acct['account'], password=acct['password'], server=acct['server']):
+    if not mt5.login(creds['account'], password=creds['password'], server=creds['server']):
         log(f"Login failed: {mt5.last_error()}")
         return
 

@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Dict, Optional
 
 import MetaTrader5 as mt5
+from credential_manager import get_credentials, CredentialError
 
 # Add modules to path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -38,17 +39,41 @@ except ImportError:
 # CONFIGURATION - BLUE GUARDIAN $100K CHALLENGE
 # ==============================================================================
 
+# Load credentials from credential_manager (defaults to BG_INSTANT, can be overridden)
+def _load_bg_credentials():
+    """Load Blue Guardian credentials from credential_manager"""
+    try:
+        creds = get_credentials('BG_INSTANT')
+        return {
+            'account': creds['account'],
+            'password': creds['password'],
+            'server': creds['server'],
+            'terminal_path': creds['terminal_path'],
+            'magic_number': creds['magic'],
+        }
+    except CredentialError as e:
+        print(f"Warning: Could not load BG_INSTANT credentials: {e}")
+        return {
+            'account': 366604,
+            'password': '',  # Will fail if not set
+            'server': 'BlueGuardian-Server',
+            'terminal_path': r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe",
+            'magic_number': 366001,
+        }
+
+_bg_creds = _load_bg_credentials()
+
 CONFIG = {
-    # Account credentials
-    'account': 366592,
-    'password': '',  # FILL IN YOUR PASSWORD
-    'server': 'BlueGuardian-Server',
-    'terminal_path': r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe",
+    # Account credentials (loaded from credential_manager)
+    'account': _bg_creds['account'],
+    'password': _bg_creds['password'],
+    'server': _bg_creds['server'],
+    'terminal_path': _bg_creds['terminal_path'],
 
     # Trading parameters
     'symbol': 'BTCUSD',
     'timeframe': mt5.TIMEFRAME_M5,
-    'magic_number': 366001,
+    'magic_number': _bg_creds['magic_number'],
 
     # Risk management (conservative for prop firm)
     'base_volume': 0.01,

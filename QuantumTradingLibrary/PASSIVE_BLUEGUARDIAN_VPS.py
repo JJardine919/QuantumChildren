@@ -6,6 +6,7 @@ import numpy as np
 import time
 from datetime import datetime
 import pandas as pd
+from credential_manager import get_credentials, CredentialError
 
 # For VPS/Wine environment
 os.environ['DISPLAY'] = ':99'
@@ -18,10 +19,13 @@ mt5 = MetaTrader5(host='localhost', port=18812)
 # CONFIGURATION - BLUE GUARDIAN $100K CHALLENGE (VPS)
 # ==============================================================================
 
+# Load credentials from credential_manager
+bg_creds = get_credentials('BG_CHALLENGE')
+
 CONFIG = {
-    'account': 365060,
-    'password': ')8xaE(gAuU',
-    'server': 'BlueGuardian-Server',
+    'account': bg_creds['account'],
+    'password': bg_creds['password'],
+    'server': bg_creds['server'],
     'terminal_path': '/root/.wine/drive_c/Program Files/Blue Guardian MT5 Terminal/terminal64.exe',
 
     'symbol': 'BTCUSD',

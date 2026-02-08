@@ -222,12 +222,14 @@ class TEQAInjection:
     - Stronger TEQA signals = larger insertion
     """
 
-    def __init__(self, signal_path: str = None, insertion_strength: float = 0.2):
+    def __init__(self, signal_path: str = None, insertion_strength: float = 0.2,
+                 rabies_aggression: float = 1.0):
         if signal_path is None:
             self.signal_path = SCRIPT_DIR / 'te_quantum_signal.json'
         else:
             self.signal_path = Path(signal_path)
         self.insertion_strength = insertion_strength
+        self.rabies_aggression = rabies_aggression
 
     def _load_signal(self) -> Optional[dict]:
         if not self.signal_path.exists():
@@ -259,8 +261,10 @@ class TEQAInjection:
         te_vector = np.array([confidence, direction * confidence, novelty,
                              vote_ratio, entropy / 25.0, n_active])
 
+        effective_strength = self.insertion_strength * self.rabies_aggression
         logger.info(f"[TEQA] Inserting TE vector: conf={confidence:.3f} dir={'LONG' if direction==1 else 'SHORT'} "
-                    f"novelty={novelty:.3f}")
+                    f"novelty={novelty:.3f} effective_strength={effective_strength:.3f} "
+                    f"(base={self.insertion_strength:.2f} x rabies={self.rabies_aggression:.1f})")
 
         # Insert into hidden-to-hidden weights as a rank-1 perturbation
         # This is the "transposon insertion" — it modifies the recurrent pathway
@@ -282,18 +286,23 @@ class TEQAInjection:
             projection /= np.linalg.norm(projection, axis=1, keepdims=True) + 1e-8
             te_hidden = np.dot(te_vector, projection)  # shape: (hidden_size,)
 
-            # Scale by existing weight statistics
-            w_std = W.std().item()
-            te_bias = torch.tensor(te_hidden, dtype=torch.float32) * w_std * self.insertion_strength
-
-            # Insert into cell gate and input gate (where TEs have most impact)
-            # Cell gate = memory formation, Input gate = what gets remembered
+            # Scale by PER-GATE weight statistics (not overall W std)
+            # This ensures TEQA insertion scales proportionally even after rabies amplification
             cell_gate = W[2*h:3*h]  # (128, 128)
             input_gate = W[0:h]      # (128, 128)
 
-            # Rank-1 update: add TE bias to every row (broadcast)
-            cell_gate += te_bias.unsqueeze(0).expand_as(cell_gate) * direction
-            input_gate += te_bias.unsqueeze(0).expand_as(input_gate) * confidence
+            cell_std = cell_gate.std().item()
+            input_std = input_gate.std().item()
+
+            te_hidden_tensor = torch.tensor(te_hidden, dtype=torch.float32)
+
+            # Rank-1 update: each gate uses its OWN std so insertion is proportional
+            # to gate magnitude, not the overall matrix average
+            cell_bias = te_hidden_tensor * cell_std * effective_strength
+            input_bias = te_hidden_tensor * input_std * effective_strength
+
+            cell_gate += cell_bias.unsqueeze(0).expand_as(cell_gate) * direction
+            input_gate += input_bias.unsqueeze(0).expand_as(input_gate) * confidence
 
             mutant[key] = W
             logger.info(f"  [{key}] TE inserted into cell+input gates")
@@ -498,7 +507,8 @@ class MushroomRabiesLab:
                  compress_fidelity: float = 0.85):
         self.rabies = RabiesInjection(aggression=rabies_aggression)
         self.mushrooms = MushroomTrip(dose=mushroom_dose)
-        self.teqa = TEQAInjection(insertion_strength=teqa_strength)
+        self.teqa = TEQAInjection(insertion_strength=teqa_strength,
+                                   rabies_aggression=rabies_aggression)
         self.compressor = QuantumCompressor(fidelity_threshold=compress_fidelity)
 
     def load_expert(self, path: str) -> Tuple[nn.Module, dict]:

@@ -14,24 +14,36 @@ import rpyc
 # For VPS/Wine environment
 os.environ['DISPLAY'] = ':99'
 
+# Import credentials securely
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from credential_manager import get_credentials, CredentialError
+
 # ==============================================================================
 # CONFIGURATION - BLUE GUARDIAN $100K CHALLENGE (VPS)
 # ==============================================================================
 
-CONFIG = {
-    'account': 365060,
-    'password': ')8xaE(gAuU',
-    'server': 'BlueGuardian-Server',
-    'terminal_path': r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe",
+def _load_config():
+    """Load config with credentials from .env file."""
+    try:
+        creds = get_credentials('BG_CHALLENGE')
+        return {
+            'account': creds['account'],
+            'password': creds['password'],
+            'server': creds['server'],
+            'terminal_path': r"C:\Program Files\Blue Guardian MT5 Terminal\terminal64.exe",
+            'symbol': 'BTCUSD',
+            'magic_number': 365001,
+            'volume': 0.01,
+            'risk_multiplier': 1.5,
+            'tp_ratio': 3.0,
+            'be_percent': 0.5,
+        }
+    except CredentialError as e:
+        print(f"Failed to load BG_CHALLENGE credentials: {e}")
+        print("Please configure BG_CHALLENGE_PASSWORD in .env file")
+        sys.exit(1)
 
-    'symbol': 'BTCUSD',
-    'magic_number': 365001,
-
-    'volume': 0.01,
-    'risk_multiplier': 1.5,
-    'tp_ratio': 3.0,
-    'be_percent': 0.5,
-}
+CONFIG = _load_config()
 
 # Global MT5 connection
 mt5 = None

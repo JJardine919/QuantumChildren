@@ -1,5 +1,6 @@
 import sys, os, traceback
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'ETARE_QuantumFusion', 'modules'))
+from credential_manager import get_credentials, CredentialError
 
 with open('test_result.txt', 'w') as f:
     try:
@@ -12,12 +13,22 @@ with open('test_result.txt', 'w') as f:
 
         f.write("Imports OK\n")
 
-        path = r"C:\Program Files\Atlas Funded MT5 Terminal\terminal64.exe"
-        if not mt5.initialize(path=path):
+        # Load credentials from credential_manager
+        try:
+            _creds = get_credentials('ATLAS')
+            _account = _creds['account']
+            _password = _creds['password']
+            _server = _creds['server']
+            _path = _creds['terminal_path']
+        except CredentialError as e:
+            f.write(f"Credential error: {e}\n")
+            sys.exit(1)
+
+        if not mt5.initialize(path=_path):
             f.write(f"MT5 init failed: {mt5.last_error()}\n")
             sys.exit(1)
 
-        if not mt5.login(212000584, password='M6NLk79MN@', server='AtlasFunded-Server'):
+        if not mt5.login(_account, password=_password, server=_server):
             f.write(f"Login failed: {mt5.last_error()}\n")
             mt5.shutdown()
             sys.exit(1)
