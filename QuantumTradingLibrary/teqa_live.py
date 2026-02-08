@@ -18,6 +18,7 @@ Author: DooDoo + Claude
 Date: 2026-02-07
 """
 
+import os
 import sys
 import io
 import time
@@ -25,6 +26,7 @@ import json
 import shutil
 import logging
 import argparse
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -41,6 +43,9 @@ from credential_manager import get_credentials, CredentialError
 
 # Import TEQA v3.0 engine
 from teqa_v3_neural_te import TEQAv3Engine
+
+# Import signal history DB
+from teqa_signal_history import SignalHistoryDB
 
 logging.basicConfig(
     level=logging.INFO,
@@ -209,6 +214,9 @@ def build_signal_json(result: dict) -> dict:
             "n_active_neural": result.get("n_active_neural", 0),
         },
 
+        # --- v3.1 evolution fields ---
+        "evolution": result.get("evolution", {"enabled": False}),
+
         "timestamp": result.get("timestamp", datetime.now().isoformat()),
         "version": result.get("version", "TEQA-3.0-NEURAL-TE"),
         "symbol": result.get("symbol", "UNKNOWN"),
@@ -221,7 +229,8 @@ def build_signal_json(result: dict) -> dict:
 
 def run_once(engine: TEQAv3Engine, fetcher: MT5DataFetcher,
              symbol: str, output_path: str,
-             donor_symbol: str = None) -> bool:
+             donor_symbol: str = None,
+             history_db: SignalHistoryDB = None) -> bool:
     """Run one TEQA v3.0 cycle: fetch OHLCV → neural-TE quantum → emit JSON."""
     bars = fetcher.fetch_ohlcv(symbol)
     if len(bars) == 0:
@@ -251,12 +260,26 @@ def run_once(engine: TEQAv3Engine, fetcher: MT5DataFetcher,
             donor_symbol=donor_symbol,
         )
 
-        # Build bridge-compatible JSON and write
+        # Build bridge-compatible JSON and write atomically
         signal_json = build_signal_json(result)
-        with open(output_path, 'w') as f:
-            json.dump(signal_json, f, indent=2, default=str)
+        out_dir = os.path.dirname(output_path) or '.'
+        fd, tmp_path = tempfile.mkstemp(suffix='.tmp', dir=out_dir)
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump(signal_json, f, indent=2, default=str)
+            os.replace(tmp_path, output_path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
         logger.info(f"TEQA v3.0 signal emitted -> {output_path}")
+
+        # Log to history database
+        if history_db:
+            history_db.log_signal(signal_json)
 
         # Log key signal info
         direction = "LONG" if result["direction"] == 1 else ("SHORT" if result["direction"] == -1 else "NEUTRAL")
@@ -265,10 +288,33 @@ def run_once(engine: TEQAv3Engine, fetcher: MT5DataFetcher,
         consensus = result.get("consensus_score", 0.0)
         gates = result.get("gates", {})
         all_gates_pass = all(gates.values()) if gates else False
+
+        # Evolution feedback: what did the market ACTUALLY do in the most recent bar?
+        # Compare bar[-1] close to bar[-2] close. This is the ground truth.
+        evo_info = ""
+        if len(bars) >= 2:
+            actual_move = bars[-1, 3] - bars[-2, 3]
+            if actual_move > 0:
+                actual_direction = 1
+            elif actual_move < 0:
+                actual_direction = -1
+            else:
+                actual_direction = 0
+
+            evo_event = engine.feed_market_direction(actual_direction)
+            if evo_event and evo_event.get("actions"):
+                actions = [a.get("type", "?") for a in evo_event["actions"]]
+                evo_info = f" | evo=gen{evo_event.get('generation', '?')}({','.join(actions)})"
+            elif engine.evolution:
+                stats = engine.evolution.get_population_stats()
+                evo_info = (f" | evo=gen{stats['generation']} "
+                           f"acc={stats['avg_accuracy']:.0%} "
+                           f"uniq={stats['unique_genomes']}/{stats['n_neurons']}")
+
         logger.info(
             f"Signal: {direction} {conf:.1%} | shock={shock} | "
             f"consensus={consensus:.1%} | gates={'PASS' if all_gates_pass else 'FAIL'} | "
-            f"{result.get('elapsed_ms', 0):.0f}ms"
+            f"{result.get('elapsed_ms', 0):.0f}ms{evo_info}"
         )
 
         return True
@@ -280,7 +326,8 @@ def run_once(engine: TEQAv3Engine, fetcher: MT5DataFetcher,
 
 def run_multi(engine: TEQAv3Engine, fetcher: MT5DataFetcher,
               symbols: list, script_dir: Path,
-              donor_symbol: str = None) -> int:
+              donor_symbol: str = None,
+              history_db: SignalHistoryDB = None) -> int:
     """
     Run TEQA v3.0 for multiple symbols in one cycle.
     Writes per-symbol files (te_quantum_signal_BTCUSD.json) and
@@ -292,13 +339,23 @@ def run_multi(engine: TEQAv3Engine, fetcher: MT5DataFetcher,
     for sym in symbols:
         per_symbol_path = str(script_dir / f'te_quantum_signal_{sym}.json')
         ok = run_once(engine, fetcher, sym, per_symbol_path,
-                      donor_symbol=donor_symbol)
+                      donor_symbol=donor_symbol, history_db=history_db)
         if ok:
             successes += 1
-            # Also write legacy generic file (last successful symbol wins)
+            # Also write legacy generic file atomically (last successful symbol wins)
             legacy_path = str(script_dir / 'te_quantum_signal.json')
             try:
-                shutil.copy2(per_symbol_path, legacy_path)
+                fd, tmp_legacy = tempfile.mkstemp(suffix='.tmp', dir=str(script_dir))
+                os.close(fd)
+                try:
+                    shutil.copy2(per_symbol_path, tmp_legacy)
+                    os.replace(tmp_legacy, legacy_path)
+                except BaseException:
+                    try:
+                        os.unlink(tmp_legacy)
+                    except OSError:
+                        pass
+                    raise
             except Exception as e:
                 logger.warning(f"Failed to copy legacy signal file: {e}")
     return successes
@@ -333,6 +390,9 @@ def main():
     script_dir = Path(__file__).parent.absolute()
     if not multi_mode:
         output_path = args.output or str(script_dir / 'te_quantum_signal.json')
+
+    # Initialize signal history database
+    history_db = SignalHistoryDB()
 
     # Initialize TEQA v3.0 engine
     logger.info(f"Initializing TEQA v3.0 Neural-TE engine ({args.neurons} neurons, {args.shots} shots)...")
@@ -372,12 +432,14 @@ def main():
 
             if multi_mode:
                 successes = run_multi(engine, fetcher, symbol_list, script_dir,
-                                      donor_symbol=args.donor_symbol)
+                                      donor_symbol=args.donor_symbol,
+                                      history_db=history_db)
                 success = successes > 0
                 logger.info(f"Cycle complete: {successes}/{len(symbol_list)} symbols processed")
             else:
                 success = run_once(engine, fetcher, symbol_list[0], output_path,
-                                   donor_symbol=args.donor_symbol)
+                                   donor_symbol=args.donor_symbol,
+                                   history_db=history_db)
 
             if args.once:
                 sys.exit(0 if success else 1)

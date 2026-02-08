@@ -90,6 +90,14 @@ class TEQASignal:
     # Symbol
     symbol: str = ""
 
+    # --- v3.1 Evolution fields ---
+    evolution_enabled: bool = False
+    evolution_generation: int = 0
+    evolution_avg_accuracy: float = 0.5
+    evolution_best_accuracy: float = 0.5
+    evolution_unique_genomes: int = 0
+    evolution_speciation_pressure: bool = False
+
     @property
     def is_v3(self) -> bool:
         """Whether this signal came from TEQA v3.0."""
@@ -234,6 +242,7 @@ class TEQABridge:
             domestication = data.get('domestication', {})
             gates = data.get('gates', {})
             te_summary = data.get('te_summary', {})
+            evolution = data.get('evolution', {})
 
             signal = TEQASignal(
                 # v2.0 fields
@@ -275,6 +284,14 @@ class TEQABridge:
                 n_active_class_ii=te_summary.get('n_active_class_ii', 0),
                 n_active_neural=te_summary.get('n_active_neural', 0),
                 symbol=signal_symbol,
+
+                # v3.1 evolution fields
+                evolution_enabled=evolution.get('enabled', False),
+                evolution_generation=evolution.get('generation', 0),
+                evolution_avg_accuracy=evolution.get('avg_accuracy', 0.5),
+                evolution_best_accuracy=evolution.get('best_accuracy', 0.5),
+                evolution_unique_genomes=evolution.get('unique_genomes', 0),
+                evolution_speciation_pressure=evolution.get('speciation_pressure', False),
             )
 
             self._signal_cache[cache_key] = (signal, current_mtime)
@@ -364,11 +381,17 @@ class TEQABridge:
             return f"[TEQA] BLOCKED ({', '.join(signal.blocked_reasons)})"
 
         if signal.is_v3:
+            evo_str = ""
+            if signal.evolution_enabled:
+                evo_str = (f" | evo=gen{signal.evolution_generation} "
+                           f"acc={signal.evolution_avg_accuracy:.0%} "
+                           f"uniq={signal.evolution_unique_genomes}")
             return (f"[TEQA v3] {signal.direction_str} {signal.confidence:.1%} "
                     f"| neurons={signal.n_neurons} consensus={signal.consensus_score:.0%} "
                     f"| shock={signal.shock_label} "
                     f"| lot={signal.lot_scale:.1f}x "
-                    f"| TEs: I={signal.n_active_class_i} II={signal.n_active_class_ii} N={signal.n_active_neural}")
+                    f"| TEs: I={signal.n_active_class_i} II={signal.n_active_class_ii} N={signal.n_active_neural}"
+                    f"{evo_str}")
 
         return (f"[TEQA] {signal.direction_str} {signal.confidence:.1%} "
                 f"| lot={signal.lot_scale:.1f}x | novelty={signal.novelty:.2f} "

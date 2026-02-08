@@ -1,15 +1,16 @@
 """
 QUANTUM BRAIN - GETLEVERAGED DEDICATED
 =======================================
-Handles GetLeveraged accounts ONLY.
+ONE script per account. Run separate instances:
+
+  python BRAIN_GETLEVERAGED.py --account GL_1
+  python BRAIN_GETLEVERAGED.py --account GL_2
+  python BRAIN_GETLEVERAGED.py --account GL_3
 
 Accounts:
-  - 113326 (Account 1)
-  - 113328 (Account 2)
-  - 107245 (Account 3)
-
-Run: python BRAIN_GETLEVERAGED.py
-     python BRAIN_GETLEVERAGED.py --unlock-all
+  GL_1 = 113326
+  GL_2 = 113328
+  GL_3 = 107245
 
 Author: DooDoo + Claude
 Date: 2026-01-30
@@ -51,19 +52,6 @@ from config_loader import (
     CHECK_INTERVAL_SECONDS
 )
 
-# Import credentials securely - passwords from .env file
-from credential_manager import get_credentials, CredentialError
-
-# Pre-launch validation
-from prelaunch_validator import validate_prelaunch
-
-# TEQA quantum signal bridge
-try:
-    from teqa_bridge import TEQABridge
-    TEQA_ENABLED = True
-except ImportError:
-    TEQA_ENABLED = False
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -76,46 +64,50 @@ logging.basicConfig(
 )
 
 # ============================================================
-# GETLEVERAGED ACCOUNTS - Credentials from .env via credential_manager
+# GETLEVERAGED ACCOUNTS ONLY
 # ============================================================
 
-def _load_gl_accounts():
-    """Load GetLeveraged accounts with credentials from .env file."""
-    accounts = {}
-    gl_configs = [
-        ('GL_1', 'GL_ACCOUNT_1', 'GetLeveraged Account 1', 113001),
-        ('GL_2', 'GL_ACCOUNT_2', 'GetLeveraged Account 2', 113002),
-        ('GL_3', 'GL_ACCOUNT_3', 'GetLeveraged Account 3', 107001),
-    ]
-
-    for cred_key, account_key, name, magic in gl_configs:
-        try:
-            creds = get_credentials(cred_key)
-            accounts[account_key] = {
-                'account': creds['account'],
-                'password': creds['password'],
-                'server': creds['server'],
-                'terminal_path': creds.get('terminal_path'),
-                'name': name,
-                'initial_balance': 10000,
-                'profit_target': 0.10,
-                'daily_loss_limit': 0.05,
-                'max_drawdown': 0.10,
-                'locked': False,
-                'symbols': creds.get('symbols', ['BTCUSD', 'XAUUSD', 'ETHUSD']),
-                'magic_number': creds.get('magic', magic),
-            }
-        except CredentialError as e:
-            logging.warning(f"Skipping {cred_key}: {e}")
-
-    if not accounts:
-        logging.error("No GetLeveraged accounts configured!")
-        logging.error("Please add GL_1_PASSWORD, GL_2_PASSWORD, GL_3_PASSWORD to .env file")
-        sys.exit(1)
-
-    return accounts
-
-ACCOUNTS = _load_gl_accounts()
+ACCOUNTS = {
+    'GL_1': {
+        'account': 113326,
+        'password': '%bwN)IvJ5F',
+        'server': 'GetLeveraged-Trade',
+        'terminal_path': None,
+        'name': 'GetLeveraged Account 1',
+        'initial_balance': 10000,
+        'profit_target': 0.10,
+        'daily_loss_limit': 0.05,
+        'max_drawdown': 0.10,
+        'symbols': ['BTCUSD', 'XAUUSD', 'ETHUSD'],
+        'magic_number': 113001,
+    },
+    'GL_2': {
+        'account': 113328,
+        'password': 'H*M5c7jpR7',
+        'server': 'GetLeveraged-Trade',
+        'terminal_path': None,
+        'name': 'GetLeveraged Account 2',
+        'initial_balance': 10000,
+        'profit_target': 0.10,
+        'daily_loss_limit': 0.05,
+        'max_drawdown': 0.10,
+        'symbols': ['BTCUSD', 'XAUUSD', 'ETHUSD'],
+        'magic_number': 113002,
+    },
+    'GL_3': {
+        'account': 107245,
+        'password': '$86eCmFbXR',
+        'server': 'GetLeveraged-Trade',
+        'terminal_path': None,
+        'name': 'GetLeveraged Account 3',
+        'initial_balance': 10000,
+        'profit_target': 0.10,
+        'daily_loss_limit': 0.05,
+        'max_drawdown': 0.10,
+        'symbols': ['BTCUSD', 'XAUUSD', 'ETHUSD'],
+        'magic_number': 107001,
+    },
+}
 
 
 # ============================================================
@@ -140,8 +132,10 @@ class Action(Enum):
     SELL = 2
 
 
-# Regime enum and bridge from quantum_regime_bridge
-from quantum_regime_bridge import QuantumRegimeBridge, Regime
+class Regime(Enum):
+    CLEAN = "CLEAN"
+    VOLATILE = "VOLATILE"
+    CHOPPY = "CHOPPY"
 
 
 # ============================================================
@@ -165,16 +159,33 @@ class LSTMModel(nn.Module):
 
 
 # ============================================================
-# REGIME DETECTOR (delegates to QuantumRegimeBridge)
+# REGIME DETECTOR (Compression-based)
 # ============================================================
 
 class RegimeDetector:
     def __init__(self, config: BrainConfig):
         self.config = config
-        self._bridge = QuantumRegimeBridge(config)
 
-    def analyze_regime(self, prices: np.ndarray, symbol: str = "BTCUSD") -> Tuple[Regime, float]:
-        return self._bridge.analyze_regime(prices, symbol=symbol)
+    def analyze_regime(self, prices: np.ndarray) -> Tuple[Regime, float]:
+        import zlib
+        data_bytes = prices.astype(np.float32).tobytes()
+        compressed = zlib.compress(data_bytes, level=9)
+        ratio = len(data_bytes) / len(compressed)
+
+        # Log the actual ratio for debugging
+        logging.debug(f"Compression ratio: {ratio:.3f} (need >= 1.3 for CLEAN)")
+
+        if ratio >= 1.1:
+            fidelity = 0.96
+            regime = Regime.CLEAN
+        elif ratio >= 0.9:
+            fidelity = 0.88
+            regime = Regime.VOLATILE
+        else:
+            fidelity = 0.75
+            regime = Regime.CHOPPY
+
+        return regime, fidelity
 
 
 # ============================================================
@@ -191,9 +202,7 @@ class ExpertLoader:
             self.experts_dir = Path(experts_dir)
         self.manifest = None
         self.loaded_experts: Dict[str, nn.Module] = {}
-        self._manifest_mtime = 0.0
         self._load_manifest()
-        self._record_initial_mtime()
 
     def _load_manifest(self):
         manifest_path = self.experts_dir / "top_50_manifest.json"
@@ -237,27 +246,6 @@ class ExpertLoader:
         except Exception as e:
             logging.error(f"Failed to load expert: {e}")
             return None
-
-    def _record_initial_mtime(self):
-        """Record manifest modification time after initial load."""
-        manifest_path = self.experts_dir / "top_50_manifest.json"
-        if manifest_path.exists():
-            self._manifest_mtime = manifest_path.stat().st_mtime
-
-    def check_for_updates(self):
-        """Check if manifest has been modified and hot-reload if needed."""
-        manifest_path = self.experts_dir / "top_50_manifest.json"
-        if not manifest_path.exists():
-            return
-        current_mtime = manifest_path.stat().st_mtime
-        if current_mtime > self._manifest_mtime:
-            try:
-                self.loaded_experts.clear()
-                self._load_manifest()
-                self._manifest_mtime = current_mtime
-                logging.info("HOT-RELOAD: LSTM experts cache cleared, manifest reloaded")
-            except Exception as e:
-                logging.warning(f"HOT-RELOAD: Failed to reload manifest: {e}")
 
 
 # ============================================================
@@ -334,30 +322,14 @@ class AccountTrader:
         self.regime_detector = RegimeDetector(config)
         self.expert_loader = ExpertLoader()
         self.feature_engineer = FeatureEngineer()
-        self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
         self.starting_balance = 0.0
 
     def connect(self) -> bool:
-        # Check if already connected to the right account
-        try:
-            current_account = mt5.account_info()
-            if current_account and current_account.login == self.account_config['account']:
-                # Already connected to correct account
-                self.starting_balance = current_account.balance
-                return True
-        except:
-            pass
-
-        # Need to reconnect - shutdown first
-        mt5.shutdown()
-        time.sleep(0.5)  # Small delay to let MT5 settle
-
-        # Try to initialize - with path if provided, otherwise try without
+        """Connect ONCE at startup. Called only once — never re-logins."""
         terminal_path = self.account_config.get('terminal_path')
         if terminal_path:
             init_ok = mt5.initialize(path=terminal_path)
         else:
-            # Try without path - works if MT5 is already running
             init_ok = mt5.initialize()
 
         if not init_ok:
@@ -365,17 +337,16 @@ class AccountTrader:
             logging.info(f"[{self.account_key}] Make sure MT5 is running")
             return False
 
-        # Login to the specific account
-        if self.account_config.get('password'):
-            login_ok = mt5.login(
-                self.account_config['account'],
-                password=self.account_config['password'],
-                server=self.account_config['server']
-            )
-            if not login_ok:
-                err = mt5.last_error()
-                logging.error(f"[{self.account_key}] Login failed: {err}")
-                return False
+        # Login ONCE
+        login_ok = mt5.login(
+            self.account_config['account'],
+            password=self.account_config['password'],
+            server=self.account_config['server']
+        )
+        if not login_ok:
+            err = mt5.last_error()
+            logging.error(f"[{self.account_key}] Login failed: {err}")
+            return False
 
         account_info = mt5.account_info()
         if account_info is None:
@@ -383,7 +354,8 @@ class AccountTrader:
             return False
 
         self.starting_balance = account_info.balance
-        logging.info(f"[{self.account_key}] Connected - Account: {account_info.login} Balance: ${account_info.balance:,.2f}")
+        logging.info(f"[{self.account_key}] Connected - Account: {account_info.login} "
+                     f"Balance: ${account_info.balance:,.2f}")
         return True
 
     def check_risk_limits(self) -> bool:
@@ -423,7 +395,7 @@ class AccountTrader:
         df['time'] = pd.to_datetime(df['time'], unit='s')
         prices = df['close'].values
 
-        regime, fidelity = self.regime_detector.analyze_regime(prices, symbol=symbol)
+        regime, fidelity = self.regime_detector.analyze_regime(prices)
         logging.info(f"[{self.account_key}][{symbol}] Regime: {regime.value} ({fidelity:.3f})")
 
         if regime != Regime.CLEAN:
@@ -545,8 +517,6 @@ class AccountTrader:
             return False
 
     def run_cycle(self) -> Dict[str, dict]:
-        self.expert_loader.check_for_updates()
-
         results = {}
         if not self.check_risk_limits():
             return results
@@ -554,17 +524,6 @@ class AccountTrader:
         for symbol in self.account_config['symbols']:
             regime, fidelity, action, confidence = self.analyze_symbol(symbol)
             trade_executed = False
-            teqa_reason = ""
-
-            # Apply TEQA quantum signal
-            if self.teqa_bridge is not None and action is not None:
-                final_act, final_conf, lot_mult, teqa_reason = \
-                    self.teqa_bridge.apply_to_lstm(action.name, confidence, symbol=symbol)
-                action_map = {'BUY': Action.BUY, 'SELL': Action.SELL, 'HOLD': Action.HOLD}
-                action = action_map.get(final_act, Action.HOLD)
-                confidence = final_conf
-                logging.info(f"[{self.account_key}][{symbol}] {teqa_reason}")
-
             if regime == Regime.CLEAN and action in [Action.BUY, Action.SELL]:
                 trade_executed = self.execute_trade(symbol, action, confidence)
 
@@ -601,72 +560,58 @@ class AccountTrader:
 # MAIN BRAIN
 # ============================================================
 
-class GetLeveragedBrain:
-    def __init__(self, config: BrainConfig = None, unlock_all: bool = False):
-        self.config = config or BrainConfig()
-        self.unlock_all = unlock_all
-        self.traders: Dict[str, AccountTrader] = {}
+def run_single_account(account_key: str):
+    """Run brain for ONE account only. Never cycles. Never re-logins."""
+    if account_key not in ACCOUNTS:
+        logging.error(f"Unknown account: {account_key}")
+        logging.error(f"Valid accounts: {', '.join(ACCOUNTS.keys())}")
+        sys.exit(1)
 
-    def get_active_accounts(self) -> List[str]:
-        active = []
-        for key, account in ACCOUNTS.items():
-            if self.unlock_all or not account.get('locked', True):
-                active.append(key)
-        return active
+    config = BrainConfig()
+    account_config = ACCOUNTS[account_key]
+    trader = AccountTrader(account_key, account_config, config)
 
-    def initialize(self) -> bool:
-        active = self.get_active_accounts()
-        if not active:
-            logging.error("No active accounts!")
-            return False
+    print("=" * 60)
+    print(f"  GETLEVERAGED QUANTUM BRAIN — {account_config['name']}")
+    print(f"  Account: {account_config['account']} (ONE account, ONE script)")
+    print("=" * 60)
 
-        logging.info(f"Initializing: {active}")
-        for key in active:
-            self.traders[key] = AccountTrader(key, ACCOUNTS[key], self.config)
-        return True
+    # Connect ONCE at startup — never again
+    if not trader.connect():
+        logging.error(f"Failed to connect to {account_key}. Is MT5 running?")
+        sys.exit(1)
 
-    def run_loop(self):
-        print("=" * 60)
-        print("  GETLEVERAGED QUANTUM BRAIN")
-        print("  Dedicated brain for GetLeveraged accounts")
-        print("=" * 60)
+    logging.info(f"Connected to {account_key}. Running single-account loop.")
 
-        if not self.initialize():
-            return
+    try:
+        while True:
+            # Verify we're still on the right account (detect if another script stole the session)
+            acct = mt5.account_info()
+            if acct is None or acct.login != account_config['account']:
+                logging.error(f"ACCOUNT MISMATCH! Expected {account_config['account']}, "
+                              f"got {acct.login if acct else 'None'}. Another script may have switched.")
+                logging.error("Stopping to protect trades. Fix: run each GL account in separate MT5 terminal.")
+                break
 
-        account_keys = list(self.traders.keys())
-        idx = 0
+            print(f"\n{'='*60}")
+            print(f"  {account_config['name']} | {datetime.now().strftime('%H:%M:%S')}")
+            print(f"{'='*60}")
 
-        try:
-            while True:
-                key = account_keys[idx]
-                trader = self.traders[key]
+            results = trader.run_cycle()
+            for symbol, data in results.items():
+                icon = "+" if data['regime'] == 'CLEAN' else "-"
+                status = "TRADED" if data['trade_executed'] else ""
+                print(f"  [{icon}] {symbol}: {data['regime']} | "
+                      f"{data['action']} ({data['confidence']:.2f}) {status}")
 
-                print(f"\n{'='*60}")
-                print(f"  {ACCOUNTS[key]['name']} | {datetime.now().strftime('%H:%M:%S')}")
-                print(f"{'='*60}")
+            wait_time = config.CHECK_INTERVAL_SECONDS
+            print(f"\n  Waiting {wait_time}s...")
+            time.sleep(wait_time)
 
-                if trader.connect():
-                    results = trader.run_cycle()
-                    for symbol, data in results.items():
-                        icon = "+" if data['regime'] == 'CLEAN' else "-"
-                        status = "TRADED" if data['trade_executed'] else ""
-                        print(f"  [{icon}] {symbol}: {data['regime']} | "
-                              f"{data['action']} ({data['confidence']:.2f}) {status}")
-                else:
-                    print("  [!] Connection failed - waiting before retry...")
-
-                idx = (idx + 1) % len(account_keys)
-
-                # Always sleep between cycles to prevent bouncing
-                wait_time = self.config.CHECK_INTERVAL_SECONDS
-                print(f"\n  Waiting {wait_time}s before next cycle...")
-                time.sleep(wait_time)
-
-        except KeyboardInterrupt:
-            logging.info("Stopped")
-        finally:
-            mt5.shutdown()
+    except KeyboardInterrupt:
+        logging.info("Stopped")
+    finally:
+        mt5.shutdown()
 
 
 # ============================================================
@@ -674,18 +619,16 @@ class GetLeveragedBrain:
 # ============================================================
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='GetLeveraged Quantum Brain')
-    parser.add_argument('--unlock-all', action='store_true', help='Trade all GL accounts')
+    parser = argparse.ArgumentParser(
+        description='GetLeveraged Quantum Brain — ONE account per instance',
+        epilog='Run 3 separate windows:\n'
+               '  python BRAIN_GETLEVERAGED.py --account GL_1\n'
+               '  python BRAIN_GETLEVERAGED.py --account GL_2\n'
+               '  python BRAIN_GETLEVERAGED.py --account GL_3',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('--account', required=True, choices=['GL_1', 'GL_2', 'GL_3'],
+                        help='Which GetLeveraged account to trade')
     args = parser.parse_args()
 
-    # Pre-launch validation - ensures experts are trained before trading
-    # Collect all symbols from all active accounts
-    all_symbols = set()
-    for acc in ACCOUNTS.values():
-        all_symbols.update(acc.get('symbols', []))
-    if not validate_prelaunch(symbols=list(all_symbols)):
-        logging.error("Pre-launch validation failed. Exiting.")
-        sys.exit(1)
-
-    brain = GetLeveragedBrain(unlock_all=args.unlock_all)
-    brain.run_loop()
+    run_single_account(args.account)

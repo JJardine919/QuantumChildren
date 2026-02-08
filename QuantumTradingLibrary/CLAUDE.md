@@ -202,6 +202,56 @@ python prelaunch_validator.py --bypass          # Warn but don't block
 
 ---
 
+## GPU ACCELERATION — USE THIS, DO NOT USE CPU
+
+**This machine has an AMD RX 6800 XT GPU. USE IT.**
+
+### GPU Python Environment
+```
+Venv:     C:\Users\jimjj\Music\QuantumChildren\QuantumTradingLibrary\.venv312_gpu\
+Python:   .venv312_gpu\Scripts\python.exe  (Python 3.12.10)
+Activate: .venv312_gpu\Scripts\activate
+```
+
+### How to Use GPU in PyTorch
+```python
+import torch
+import torch_directml
+device = torch_directml.device()  # → RX 6800 XT via DirectML
+
+# Move tensors/models to GPU:
+tensor = torch.randn(1000, 1000, device=device)
+model = model.to(device)
+```
+
+### What's Installed in the GPU Venv
+torch 2.4.1 + torch-directml, numpy 2.4.2, scipy 1.17.0, pandas 3.0.0,
+scikit-learn 1.8.0, qiskit 2.3.0, qiskit-aer 0.17.2, onnx 1.20.1,
+onnxruntime 1.24.1, MetaTrader5 5.0.5572, requests, colorlog
+
+### KNOWN LIMITATION: LSTM Cannot Backprop Through DirectML
+**LSTM training DOES NOT work on GPU via DirectML.** Forward pass works, backward pass fails.
+- LSTM training must stay on CPU (lstm_retrain_fast.py runs on CPU — this is correct)
+- For GPU-accelerated training, use 1D-Conv or Transformer architecture instead
+- Alternative: WSL2 + ROCm for native AMD GPU training on Linux
+- GPU DOES accelerate: inference, ONNX runtime, tensor ops, non-LSTM model training
+
+### Rules
+1. **ALWAYS use `.venv312_gpu\Scripts\python.exe`** when running inference, quantum circuits, or non-LSTM training
+2. **ALWAYS use `torch_directml.device()`** — NOT `torch.device('cuda')` (this is AMD, not NVIDIA)
+3. **LSTM training stays on CPU** — do not attempt to move LSTM backward pass to DirectML
+4. **DO NOT install a separate venv** — `.venv312_gpu/` already has everything
+5. If a script needs a package not in the venv, `pip install` into `.venv312_gpu/`, don't create a new env
+
+### Quick Test (verify GPU works)
+```bash
+.venv312_gpu\Scripts\python.exe -c "import torch; import torch_directml; t=torch.randn(1000,1000,device=torch_directml.device()); print('GPU OK')"
+```
+
+---
+
+---
+
 ## ALGORITHM: SystematicErrorReduction
 
 ```

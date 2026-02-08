@@ -65,6 +65,13 @@ try:
 except ImportError:
     TEQA_ENABLED = False
 
+# TEQA feedback loop (domestication learning)
+try:
+    from teqa_feedback import TradeOutcomePoller
+    FEEDBACK_ENABLED = True
+except ImportError:
+    FEEDBACK_ENABLED = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -343,6 +350,17 @@ class AccountTrader:
         self.expert_loader = ExpertLoader()
         self.feature_engineer = FeatureEngineer()
         self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
+        self.feedback_poller = None
+        if FEEDBACK_ENABLED and TEQA_ENABLED:
+            try:
+                from teqa_v3_neural_te import TEDomesticationTracker
+                # Same DB file the live TEQA engine writes to
+                self.feedback_poller = TradeOutcomePoller(
+                    magic_numbers=[account_config.get('magic_number', 212001)],
+                    domestication_tracker=TEDomesticationTracker(),
+                )
+            except Exception as e:
+                logging.warning(f"[{account_key}] Feedback poller init failed: {e}")
         self.starting_balance = 0.0
 
     def connect(self) -> bool:
@@ -640,6 +658,17 @@ class AccountTrader:
                 except Exception as e:
                     pass  # Don't let collection errors affect trading
 
+        # Feed closed trade outcomes to TE domestication tracker
+        if self.feedback_poller:
+            try:
+                outcomes = self.feedback_poller.poll()
+                for o in outcomes:
+                    logging.info(f"[{self.account_key}] DOMESTICATION: "
+                                 f"{'WIN' if o['won'] else 'LOSS'} {o['symbol']} "
+                                 f"${o['profit']:.2f} | TEs: {o['te_combo']}")
+            except Exception as e:
+                logging.debug(f"[{self.account_key}] Feedback poll error: {e}")
+
         return results
 
 
@@ -692,6 +721,11 @@ class AtlasBrain:
                     # Show TEQA status line
                     if TEQA_ENABLED and trader.teqa_bridge:
                         print(f"  {trader.teqa_bridge.get_status_line()}")
+
+                    # Show feedback loop status
+                    if trader.feedback_poller:
+                        stats = trader.feedback_poller.get_stats()
+                        print(f"  [FEEDBACK] {stats['processed_tickets']} outcomes tracked")
 
                 idx = (idx + 1) % len(account_keys)
                 time.sleep(self.config.CHECK_INTERVAL_SECONDS)

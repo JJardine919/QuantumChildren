@@ -1351,7 +1351,10 @@ class TEQAv3Engine:
         n_neurons: int = DEFAULT_N_NEURONS,
         shots: int = DEFAULT_SHOTS,
         db_path: str = "teqa_domestication.db",
-        analytics_dir: str = "teqa_analytics"
+        analytics_dir: str = "teqa_analytics",
+        enable_evolution: bool = True,
+        genome_file: str = None,
+        evolve_every: int = 5,
     ):
         self.activation_engine = TEActivationEngine()
         self.shock_detector = GenomicShockDetector()
@@ -1364,6 +1367,24 @@ class TEQAv3Engine:
 
         self.n_neurons = n_neurons
         self.shots = shots
+
+        # Neural Mosaic Evolution (Darwinian selection on circuit topology)
+        self.evolution = None
+        if enable_evolution:
+            try:
+                from neural_evolution import NeuralEvolutionEngine
+                _gf = genome_file or str(Path(analytics_dir) / "evolved_genomes.json")
+                self.evolution = NeuralEvolutionEngine(
+                    mosaic=self.mosaic,
+                    genome_file=_gf,
+                    evolve_every=evolve_every,
+                )
+                log.info("Neural evolution ENABLED (evolve every %d cycles, genomes: %s)",
+                         evolve_every, _gf)
+            except ImportError:
+                log.warning("neural_evolution.py not found -- evolution disabled")
+            except Exception as e:
+                log.warning("Failed to init neural evolution: %s", e)
 
     def analyze(
         self,
@@ -1604,6 +1625,23 @@ class TEQAv3Engine:
             "neuron_results": neuron_results,
         }
 
+        # === Step 10: Evolution data (if enabled) ===
+        if self.evolution is not None:
+            evo_stats = self.evolution.get_population_stats()
+            result["evolution"] = {
+                "enabled": True,
+                "generation": evo_stats["generation"],
+                "cycle": evo_stats["cycle"],
+                "avg_accuracy": evo_stats["avg_accuracy"],
+                "best_accuracy": evo_stats["best_accuracy"],
+                "worst_accuracy": evo_stats["worst_accuracy"],
+                "unique_genomes": evo_stats["unique_genomes"],
+                "avg_similarity": evo_stats["avg_pairwise_similarity"],
+                "speciation_pressure": evo_stats["speciation_pressure"],
+            }
+        else:
+            result["evolution"] = {"enabled": False}
+
         # Save analytics
         if save_analytics:
             self._save_analytics(result)
@@ -1613,6 +1651,20 @@ class TEQAv3Engine:
     def record_trade_outcome(self, active_tes: List[str], won: bool):
         """Record a trade outcome for TE domestication learning."""
         self.domestication.record_pattern(active_tes, won)
+
+    def feed_market_direction(self, actual_direction: int) -> Optional[Dict]:
+        """
+        Feed the actual market direction back to the neural evolution engine.
+        Call this AFTER analyze() when you know what the market actually did.
+
+        actual_direction: 1 (went up), -1 (went down), 0 (flat)
+
+        Returns evolution event dict if evolution occurred, else None.
+        This is the feedback that makes the mosaic get smarter over time.
+        """
+        if self.evolution is None:
+            return None
+        return self.evolution.record_votes(actual_direction)
 
     def _save_analytics(self, result: Dict):
         """Save analytics report."""
@@ -1660,6 +1712,21 @@ class TEQAv3Engine:
                 f.write(f"  Concordance:  {result['concordance']:.4f}\n")
                 f.write(f"  Domestication boost: {result['domestication_boost']:.2f}\n")
                 f.write(f"  Amplitude sq: {result['amplitude_sq']:.4f}\n")
+
+                # Evolution section
+                evo = result.get("evolution", {})
+                if evo.get("enabled"):
+                    f.write(f"\n  NEURAL EVOLUTION (Darwinian Selection)\n")
+                    f.write("  " + "-" * 70 + "\n")
+                    f.write(f"  Generation:       {evo.get('generation', 0)}\n")
+                    f.write(f"  Cycle:            {evo.get('cycle', 0)}\n")
+                    f.write(f"  Avg accuracy:     {evo.get('avg_accuracy', 0):.1%}\n")
+                    f.write(f"  Best accuracy:    {evo.get('best_accuracy', 0):.1%}\n")
+                    f.write(f"  Worst accuracy:   {evo.get('worst_accuracy', 0):.1%}\n")
+                    f.write(f"  Unique genomes:   {evo.get('unique_genomes', 0)}/{result['n_neurons']}\n")
+                    f.write(f"  Avg similarity:   {evo.get('avg_similarity', 0):.2f}\n")
+                    f.write(f"  Speciation press: {'YES' if evo.get('speciation_pressure') else 'no'}\n")
+
                 f.write("\n" + "=" * 76 + "\n")
 
         except Exception as e:
