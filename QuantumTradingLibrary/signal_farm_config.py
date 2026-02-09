@@ -1,8 +1,8 @@
 """
-SIGNAL FARM CONFIG - 30 Virtual Account Parameter Sets
+SIGNAL FARM CONFIG - 55 Virtual Account Parameter Sets
 =======================================================
-Defines parameter sets for 30 virtual challenge accounts,
-challenge rules, and symbol specifications.
+Defines parameter sets for 55 virtual challenge accounts across
+5 balance tiers ($5K, $25K, $50K, $100K, $200K, $1M).
 
 These are SELF-CONTAINED parameters for the signal farm only.
 They do NOT modify MASTER_CONFIG.json or any existing files.
@@ -28,7 +28,25 @@ class SymbolSpec:
     volume_max: float = 10.0
     volume_step: float = 0.01
 
+# Primary symbols (challenges focus here for signal density)
 FARM_SYMBOLS = ["BTCUSD", "XAUUSD", "ETHUSD"]
+
+# Exploration symbols (for future market-learning layer, not challenge accounts)
+# Available on Atlas: 43 total instruments
+FARM_SYMBOLS_EXPLORATION = [
+    # Forex majors
+    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+    # Forex crosses
+    "EURJPY", "GBPJPY", "EURGBP", "AUDNZD", "CADJPY",
+    # Crypto
+    "LTCUSD", "BCHUSD",
+    # Metals
+    "XAGUSD",
+    # Energy
+    "WTI", "BRENT",
+    # Indices
+    "US30", "NAS100", "SPX500", "GER40", "UK100", "JPN225", "AUS200",
+]
 
 # ============================================================
 # ACCOUNT PARAMETER SETS
@@ -51,7 +69,8 @@ class FarmParams:
     max_loss_dollars: float          # Risk per trade
     compression_boost: float         # Added to raw confidence (as percentage points / 100)
 
-    # Fixed across all accounts
+    # Fixed across all accounts (overridable)
+    starting_balance: float = 0.0    # 0 = use CHALLENGE_RULES default ($5K)
     base_lot_size: float = 0.01
     max_lot_size: float = 0.10
     risk_per_trade_pct: float = 0.5  # 0.5% of balance
@@ -321,6 +340,215 @@ FARM_ACCOUNTS: Dict[str, FarmParams] = {
         max_positions_per_symbol=6, grid_spacing_atr=0.2,
         partial_tp_ratio=0.35, breakeven_trigger=0.35, trail_start_trigger=0.55,
         trail_distance_atr=0.4, max_loss_dollars=1.80, compression_boost=19.0,
+    ),
+    # ================================================================
+    # BATCH 3: TIERED BALANCE ACCOUNTS (FARM_31 - FARM_55)
+    # Same signal, test if strategies scale with capital
+    # ================================================================
+    # --- $25K TIER (5 accounts) ---
+    "FARM_31": FarmParams(
+        account_id="FARM_31", label="25K-Baseline",
+        confidence_threshold=0.22, tp_atr_multiplier=3.0, sl_atr_multiplier=1.5,
+        max_positions_per_symbol=3, grid_spacing_atr=0.5,
+        partial_tp_ratio=0.50, breakeven_trigger=0.30, trail_start_trigger=0.50,
+        trail_distance_atr=1.0, max_loss_dollars=5.00, compression_boost=12.0,
+        starting_balance=25000.0, max_lot_size=0.50,
+    ),
+    "FARM_32": FarmParams(
+        account_id="FARM_32", label="25K-Aggressive",
+        confidence_threshold=0.15, tp_atr_multiplier=2.5, sl_atr_multiplier=1.0,
+        max_positions_per_symbol=5, grid_spacing_atr=0.3,
+        partial_tp_ratio=0.40, breakeven_trigger=0.35, trail_start_trigger=0.60,
+        trail_distance_atr=0.8, max_loss_dollars=8.00, compression_boost=15.0,
+        starting_balance=25000.0, max_lot_size=0.50,
+    ),
+    "FARM_33": FarmParams(
+        account_id="FARM_33", label="25K-Conservative",
+        confidence_threshold=0.35, tp_atr_multiplier=4.0, sl_atr_multiplier=2.0,
+        max_positions_per_symbol=2, grid_spacing_atr=0.8,
+        partial_tp_ratio=0.50, breakeven_trigger=0.25, trail_start_trigger=0.40,
+        trail_distance_atr=1.2, max_loss_dollars=4.00, compression_boost=8.0,
+        starting_balance=25000.0, max_lot_size=0.50,
+    ),
+    "FARM_34": FarmParams(
+        account_id="FARM_34", label="25K-Scalp",
+        confidence_threshold=0.30, tp_atr_multiplier=1.8, sl_atr_multiplier=0.7,
+        max_positions_per_symbol=4, grid_spacing_atr=0.3,
+        partial_tp_ratio=0.65, breakeven_trigger=0.15, trail_start_trigger=0.30,
+        trail_distance_atr=0.5, max_loss_dollars=3.00, compression_boost=10.0,
+        starting_balance=25000.0, max_lot_size=0.50,
+    ),
+    "FARM_35": FarmParams(
+        account_id="FARM_35", label="25K-Grid",
+        confidence_threshold=0.20, tp_atr_multiplier=2.8, sl_atr_multiplier=1.2,
+        max_positions_per_symbol=6, grid_spacing_atr=0.3,
+        partial_tp_ratio=0.45, breakeven_trigger=0.25, trail_start_trigger=0.45,
+        trail_distance_atr=0.8, max_loss_dollars=4.00, compression_boost=14.0,
+        starting_balance=25000.0, max_lot_size=0.50,
+    ),
+    # --- $50K TIER (5 accounts) ---
+    "FARM_36": FarmParams(
+        account_id="FARM_36", label="50K-Baseline",
+        confidence_threshold=0.22, tp_atr_multiplier=3.0, sl_atr_multiplier=1.5,
+        max_positions_per_symbol=3, grid_spacing_atr=0.5,
+        partial_tp_ratio=0.50, breakeven_trigger=0.30, trail_start_trigger=0.50,
+        trail_distance_atr=1.0, max_loss_dollars=10.00, compression_boost=12.0,
+        starting_balance=50000.0, max_lot_size=1.00,
+    ),
+    "FARM_37": FarmParams(
+        account_id="FARM_37", label="50K-Momentum",
+        confidence_threshold=0.18, tp_atr_multiplier=3.5, sl_atr_multiplier=1.5,
+        max_positions_per_symbol=4, grid_spacing_atr=0.4,
+        partial_tp_ratio=0.35, breakeven_trigger=0.30, trail_start_trigger=0.50,
+        trail_distance_atr=1.0, max_loss_dollars=15.00, compression_boost=16.0,
+        starting_balance=50000.0, max_lot_size=1.00,
+    ),
+    "FARM_38": FarmParams(
+        account_id="FARM_38", label="50K-Quality",
+        confidence_threshold=0.38, tp_atr_multiplier=3.5, sl_atr_multiplier=1.5,
+        max_positions_per_symbol=2, grid_spacing_atr=0.7,
+        partial_tp_ratio=0.50, breakeven_trigger=0.20, trail_start_trigger=0.40,
+        trail_distance_atr=1.0, max_loss_dollars=8.00, compression_boost=6.0,
+        starting_balance=50000.0, max_lot_size=1.00,
+    ),
+    "FARM_39": FarmParams(
+        account_id="FARM_39", label="50K-Swing",
+        confidence_threshold=0.25, tp_atr_multiplier=4.5, sl_atr_multiplier=2.0,
+        max_positions_per_symbol=2, grid_spacing_atr=0.9,
+        partial_tp_ratio=0.40, breakeven_trigger=0.20, trail_start_trigger=0.35,
+        trail_distance_atr=1.3, max_loss_dollars=12.00, compression_boost=10.0,
+        starting_balance=50000.0, max_lot_size=1.00,
+    ),
+    "FARM_40": FarmParams(
+        account_id="FARM_40", label="50K-Grid",
+        confidence_threshold=0.20, tp_atr_multiplier=2.5, sl_atr_multiplier=1.0,
+        max_positions_per_symbol=6, grid_spacing_atr=0.25,
+        partial_tp_ratio=0.45, breakeven_trigger=0.28, trail_start_trigger=0.48,
+        trail_distance_atr=0.7, max_loss_dollars=7.00, compression_boost=14.0,
+        starting_balance=50000.0, max_lot_size=1.00,
+    ),
+    # --- $100K TIER (5 accounts) ---
+    "FARM_41": FarmParams(
+        account_id="FARM_41", label="100K-Baseline",
+        confidence_threshold=0.22, tp_atr_multiplier=3.0, sl_atr_multiplier=1.5,
+        max_positions_per_symbol=3, grid_spacing_atr=0.5,
+        partial_tp_ratio=0.50, breakeven_trigger=0.30, trail_start_trigger=0.50,
+        trail_distance_atr=1.0, max_loss_dollars=20.00, compression_boost=12.0,
+        starting_balance=100000.0, max_lot_size=2.00,
+    ),
+    "FARM_42": FarmParams(
+        account_id="FARM_42", label="100K-Aggressive",
+        confidence_threshold=0.15, tp_atr_multiplier=2.5, sl_atr_multiplier=1.0,
+        max_positions_per_symbol=5, grid_spacing_atr=0.3,
+        partial_tp_ratio=0.40, breakeven_trigger=0.35, trail_start_trigger=0.60,
+        trail_distance_atr=0.8, max_loss_dollars=35.00, compression_boost=15.0,
+        starting_balance=100000.0, max_lot_size=2.00,
+    ),
+    "FARM_43": FarmParams(
+        account_id="FARM_43", label="100K-Conservative",
+        confidence_threshold=0.35, tp_atr_multiplier=4.0, sl_atr_multiplier=2.0,
+        max_positions_per_symbol=2, grid_spacing_atr=0.8,
+        partial_tp_ratio=0.50, breakeven_trigger=0.25, trail_start_trigger=0.40,
+        trail_distance_atr=1.2, max_loss_dollars=15.00, compression_boost=8.0,
+        starting_balance=100000.0, max_lot_size=2.00,
+    ),
+    "FARM_44": FarmParams(
+        account_id="FARM_44", label="100K-Scalp",
+        confidence_threshold=0.28, tp_atr_multiplier=1.8, sl_atr_multiplier=0.7,
+        max_positions_per_symbol=4, grid_spacing_atr=0.3,
+        partial_tp_ratio=0.65, breakeven_trigger=0.15, trail_start_trigger=0.30,
+        trail_distance_atr=0.5, max_loss_dollars=12.00, compression_boost=10.0,
+        starting_balance=100000.0, max_lot_size=2.00,
+    ),
+    "FARM_45": FarmParams(
+        account_id="FARM_45", label="100K-Swing",
+        confidence_threshold=0.25, tp_atr_multiplier=5.0, sl_atr_multiplier=2.5,
+        max_positions_per_symbol=2, grid_spacing_atr=1.0,
+        partial_tp_ratio=0.40, breakeven_trigger=0.20, trail_start_trigger=0.35,
+        trail_distance_atr=1.5, max_loss_dollars=25.00, compression_boost=10.0,
+        starting_balance=100000.0, max_lot_size=2.00,
+    ),
+    # --- $200K TIER (5 accounts) ---
+    "FARM_46": FarmParams(
+        account_id="FARM_46", label="200K-Baseline",
+        confidence_threshold=0.22, tp_atr_multiplier=3.0, sl_atr_multiplier=1.5,
+        max_positions_per_symbol=3, grid_spacing_atr=0.5,
+        partial_tp_ratio=0.50, breakeven_trigger=0.30, trail_start_trigger=0.50,
+        trail_distance_atr=1.0, max_loss_dollars=40.00, compression_boost=12.0,
+        starting_balance=200000.0, max_lot_size=4.00,
+    ),
+    "FARM_47": FarmParams(
+        account_id="FARM_47", label="200K-Momentum",
+        confidence_threshold=0.18, tp_atr_multiplier=3.5, sl_atr_multiplier=1.5,
+        max_positions_per_symbol=4, grid_spacing_atr=0.4,
+        partial_tp_ratio=0.35, breakeven_trigger=0.30, trail_start_trigger=0.50,
+        trail_distance_atr=1.0, max_loss_dollars=60.00, compression_boost=16.0,
+        starting_balance=200000.0, max_lot_size=4.00,
+    ),
+    "FARM_48": FarmParams(
+        account_id="FARM_48", label="200K-Quality",
+        confidence_threshold=0.38, tp_atr_multiplier=3.5, sl_atr_multiplier=1.5,
+        max_positions_per_symbol=2, grid_spacing_atr=0.7,
+        partial_tp_ratio=0.50, breakeven_trigger=0.20, trail_start_trigger=0.40,
+        trail_distance_atr=1.0, max_loss_dollars=30.00, compression_boost=6.0,
+        starting_balance=200000.0, max_lot_size=4.00,
+    ),
+    "FARM_49": FarmParams(
+        account_id="FARM_49", label="200K-Grid",
+        confidence_threshold=0.20, tp_atr_multiplier=2.5, sl_atr_multiplier=1.0,
+        max_positions_per_symbol=6, grid_spacing_atr=0.25,
+        partial_tp_ratio=0.45, breakeven_trigger=0.28, trail_start_trigger=0.48,
+        trail_distance_atr=0.7, max_loss_dollars=25.00, compression_boost=14.0,
+        starting_balance=200000.0, max_lot_size=4.00,
+    ),
+    "FARM_50": FarmParams(
+        account_id="FARM_50", label="200K-Balanced",
+        confidence_threshold=0.26, tp_atr_multiplier=3.2, sl_atr_multiplier=1.4,
+        max_positions_per_symbol=3, grid_spacing_atr=0.55,
+        partial_tp_ratio=0.50, breakeven_trigger=0.22, trail_start_trigger=0.42,
+        trail_distance_atr=0.9, max_loss_dollars=35.00, compression_boost=11.0,
+        starting_balance=200000.0, max_lot_size=4.00,
+    ),
+    # --- $1M TIER (5 accounts) ---
+    "FARM_51": FarmParams(
+        account_id="FARM_51", label="1M-Baseline",
+        confidence_threshold=0.22, tp_atr_multiplier=3.0, sl_atr_multiplier=1.5,
+        max_positions_per_symbol=3, grid_spacing_atr=0.5,
+        partial_tp_ratio=0.50, breakeven_trigger=0.30, trail_start_trigger=0.50,
+        trail_distance_atr=1.0, max_loss_dollars=200.00, compression_boost=12.0,
+        starting_balance=1000000.0, max_lot_size=10.00,
+    ),
+    "FARM_52": FarmParams(
+        account_id="FARM_52", label="1M-Conservative",
+        confidence_threshold=0.35, tp_atr_multiplier=4.0, sl_atr_multiplier=2.0,
+        max_positions_per_symbol=2, grid_spacing_atr=0.8,
+        partial_tp_ratio=0.50, breakeven_trigger=0.25, trail_start_trigger=0.40,
+        trail_distance_atr=1.2, max_loss_dollars=150.00, compression_boost=8.0,
+        starting_balance=1000000.0, max_lot_size=10.00,
+    ),
+    "FARM_53": FarmParams(
+        account_id="FARM_53", label="1M-Momentum",
+        confidence_threshold=0.18, tp_atr_multiplier=3.5, sl_atr_multiplier=1.5,
+        max_positions_per_symbol=4, grid_spacing_atr=0.4,
+        partial_tp_ratio=0.35, breakeven_trigger=0.30, trail_start_trigger=0.50,
+        trail_distance_atr=1.0, max_loss_dollars=300.00, compression_boost=16.0,
+        starting_balance=1000000.0, max_lot_size=10.00,
+    ),
+    "FARM_54": FarmParams(
+        account_id="FARM_54", label="1M-Quality",
+        confidence_threshold=0.40, tp_atr_multiplier=3.5, sl_atr_multiplier=1.5,
+        max_positions_per_symbol=2, grid_spacing_atr=0.7,
+        partial_tp_ratio=0.50, breakeven_trigger=0.20, trail_start_trigger=0.40,
+        trail_distance_atr=1.0, max_loss_dollars=180.00, compression_boost=6.0,
+        starting_balance=1000000.0, max_lot_size=10.00,
+    ),
+    "FARM_55": FarmParams(
+        account_id="FARM_55", label="1M-Swing",
+        confidence_threshold=0.25, tp_atr_multiplier=5.0, sl_atr_multiplier=2.5,
+        max_positions_per_symbol=2, grid_spacing_atr=1.0,
+        partial_tp_ratio=0.40, breakeven_trigger=0.20, trail_start_trigger=0.35,
+        trail_distance_atr=1.5, max_loss_dollars=250.00, compression_boost=10.0,
+        starting_balance=1000000.0, max_lot_size=10.00,
     ),
 }
 

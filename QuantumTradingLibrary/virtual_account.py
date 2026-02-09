@@ -91,12 +91,16 @@ class VirtualAccount:
             for sym, spec in symbol_specs.items()
         }
 
+        # Per-account balance override (0 = use rules default)
+        bal = params.starting_balance if params.starting_balance > 0 else rules.starting_balance
+        self._effective_starting_balance = bal
+
         # Challenge state
         self.state = ChallengeState(
-            balance=rules.starting_balance,
-            starting_balance=rules.starting_balance,
-            high_water_mark=rules.starting_balance,
-            daily_start_balance=rules.starting_balance,
+            balance=bal,
+            starting_balance=bal,
+            high_water_mark=bal,
+            daily_start_balance=bal,
             start_time=time.time(),
         )
 
@@ -332,12 +336,13 @@ class VirtualAccount:
     def _restart_challenge(self):
         """Restart challenge with fresh balance and same parameters."""
         attempt = self.state.attempt_number + 1
+        bal = self._effective_starting_balance
         self.state = ChallengeState(
             attempt_number=attempt,
-            balance=self.rules.starting_balance,
-            starting_balance=self.rules.starting_balance,
-            high_water_mark=self.rules.starting_balance,
-            daily_start_balance=self.rules.starting_balance,
+            balance=bal,
+            starting_balance=bal,
+            high_water_mark=bal,
+            daily_start_balance=bal,
             start_time=time.time(),
         )
 
