@@ -4,7 +4,7 @@ SIGNAL FARM ENGINE - Main Orchestrator
 Single Python process that:
   1. Connects to ONE MT5 terminal (read-only)
   2. Fetches M5 bars for BTCUSD, XAUUSD, ETHUSD
-  3. Runs 5 virtual challenge accounts against live data
+  3. Runs 30 virtual challenge accounts against live data
   4. Reports signals/outcomes to collection server + Base44
 
 NO REAL TRADES ARE PLACED. This is a simulation engine fed by live data.
@@ -184,7 +184,7 @@ class SignalFarmEngine:
     def initialize(self) -> bool:
         """Initialize MT5 connection, symbols, indicators, and accounts."""
         print("=" * 70)
-        print("  SIGNAL FARM ENGINE - 5 Virtual Challenge Accounts")
+        print("  SIGNAL FARM ENGINE - 30 Virtual Challenge Accounts")
         print("  NO REAL TRADES - Simulation Only (Read-Only MT5)")
         print("=" * 70)
         print()

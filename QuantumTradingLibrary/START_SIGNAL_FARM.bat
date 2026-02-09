@@ -1,5 +1,5 @@
 @echo off
-title Signal Farm Engine - 5 Virtual Accounts
+title Signal Farm Engine - 30 Virtual Accounts
 echo ============================================================
 echo   SIGNAL FARM ENGINE - Starting...
 echo   NO REAL TRADES - Read-Only MT5 Simulation
