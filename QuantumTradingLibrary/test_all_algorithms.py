@@ -91,29 +91,38 @@ def test(name: str):
 @test("1. V(D)J Recombination -- Antibody Generation")
 def test_vdj():
     from vdj_recombination import VDJRecombinationEngine, VDJTEQABridge
+    from vdj_fitness import fitness_clonal_selection, classify_antibody, MEMORY_THRESHOLD
 
     db_path = os.path.join(TEST_DIR, "vdj_test.db")
-    engine = VDJRecombinationEngine(db_path=db_path)
+    engine = VDJRecombinationEngine(memory_db_path=db_path)
 
-    # Generate antibodies via recombine()
-    antibodies = engine.recombine(n=20)
-    assert len(antibodies) > 0, "No antibodies generated"
-    print(f"    Generated {len(antibodies)} antibodies")
+    # Generate antibodies via run_cycle (9-phase algorithm)
+    bars = np.random.randn(300, 5).cumsum(axis=0) + 100
+    bars[:, 4] = np.abs(bars[:, 4]) + 1  # volume must be positive
+    te_activations = [{"name": "L1_Neuronal", "strength": 0.8}]
 
-    # Record some outcomes for clonal selection
-    for ab in antibodies[:10]:
-        won = np.random.random() > 0.4
-        ab.total_trades += 1
-        if won:
-            ab.win_rate = (ab.win_rate * max(ab.total_trades - 1, 0) + 1.0) / ab.total_trades
-            ab.total_pnl += abs(np.random.randn() * 10)
-            ab.profit_factor = max(ab.profit_factor, 1.2)
-        else:
-            ab.total_pnl -= abs(np.random.randn() * 5)
+    result = engine.run_cycle(
+        bars=bars, symbol="BTCUSD", te_activations=te_activations,
+        shock_level=0.3, shock_label="CALM",
+    )
+    assert "action" in result, "run_cycle must return action"
+    print(f"    run_cycle: action={result['action']} confidence={result.get('confidence', 0):.3f}")
+    print(f"    Population: {len(engine.active_antibodies)} active, gen {engine.generation}")
 
-    # Run selection
-    survivors, dead = engine.clonal_selection(antibodies)
-    print(f"    Clonal selection: {len(survivors)} survivors, {len(dead)} dead")
+    # Test fitness function with realistic $1 SL / $3 TP scenario
+    good_result = {
+        'n_trades': 50, 'n_wins': 25, 'total_profit': 75.0, 'total_loss': -25.0,
+        'trade_returns': [3.0]*25 + [-1.0]*25, 'max_drawdown': 5.0,
+    }
+    score = fitness_clonal_selection(good_result)
+    fate = classify_antibody(score)
+    print(f"    Fitness test: 50% WR 3:1 R:R -> {score:.4f} ({fate})")
+    assert score >= MEMORY_THRESHOLD - 0.05, f"50% WR 3:1 strategy should approach MEMORY, got {score:.4f}"
+
+    # Test live outcome feedback
+    engine.record_live_outcome("BTCUSD", True, 3.0, ["L1_Neuronal"])
+    engine.record_live_outcome("BTCUSD", False, -1.0, ["L1_Neuronal"])
+    print(f"    Live feedback: 2 outcomes recorded OK")
 
     # Test bridge
     bridge = VDJTEQABridge(vdj_engine=engine)

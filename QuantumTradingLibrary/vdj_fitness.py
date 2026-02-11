@@ -13,7 +13,7 @@ Selection thresholds:
     APOPTOSIS:     F < 0.25  (strategy dies)
     SURVIVAL:      F >= 0.40 (survives, no growth)
     PROLIFERATION: F >= 0.55 (cloned with mutations)
-    MEMORY:        F >= 0.70 (promoted to memory B cell)
+    MEMORY:        F >= 0.60 (promoted to memory B cell)
 
 Affinity maturation:
     effective_rate = base_rate / (1 + 0.1 * generation)
@@ -38,8 +38,10 @@ log = logging.getLogger(__name__)
 # ============================================================
 
 # Bayesian prior for win rate (Beta distribution)
-PRIOR_ALPHA = 10
-PRIOR_BETA = 10
+# Reduced from Beta(10,10) — heavy prior crushed posterior with small samples
+# Beta(3,3) lets actual data dominate after ~10 observations
+PRIOR_ALPHA = 3
+PRIOR_BETA = 3
 
 # Fitness weights
 W_POSTERIOR_WR = 0.25
@@ -56,7 +58,7 @@ MIN_TRADES = 20
 APOPTOSIS_THRESHOLD = 0.25
 SURVIVAL_THRESHOLD = 0.40
 PROLIFERATION_THRESHOLD = 0.55
-MEMORY_THRESHOLD = 0.70
+MEMORY_THRESHOLD = 0.60
 
 # Population management
 MAX_ACTIVE_ANTIBODIES = 50
@@ -120,11 +122,13 @@ def fitness_clonal_selection(antibody_result: Dict) -> float:
     else:
         sortino_norm = 0.0
 
-    # Component 4: Consistency (low variance relative to mean)
-    if len(trade_returns) > 1 and np.mean(trade_returns) != 0:
-        consistency = 1.0 - min(1.0, np.std(trade_returns) /
-                                (abs(np.mean(trade_returns)) + 1e-10))
-        consistency = max(0.0, consistency)
+    # Component 4: Consistency (streak-based, not CoV)
+    # CoV punishes asymmetric R:R strategies ($1 SL / $3 TP always has CoV > 1)
+    # Instead: measure what fraction of trades have the correct sign (profitable)
+    if len(trade_returns) > 1:
+        positive_frac = sum(1 for r in trade_returns if r > 0) / len(trade_returns)
+        # Scale: 30% winners = 0, 50% winners = 0.5, 70%+ winners = 1.0
+        consistency = min(1.0, max(0.0, (positive_frac - 0.30) / 0.40))
     else:
         consistency = 0.0
 

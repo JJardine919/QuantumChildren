@@ -80,6 +80,13 @@ try:
 except ImportError:
     QNIF_ENABLED = False
 
+# VDJ adaptive immune memory (live feedback loop)
+try:
+    from vdj_recombination import VDJRecombinationEngine
+    VDJ_FEEDBACK_ENABLED = True
+except ImportError:
+    VDJ_FEEDBACK_ENABLED = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -387,6 +394,15 @@ class AccountTrader:
                 )
             except Exception as e:
                 logging.warning(f"[{account_key}] Feedback poller init failed: {e}")
+        # VDJ adaptive immune memory -- receives live trade outcomes
+        self.vdj_engine = None
+        if VDJ_FEEDBACK_ENABLED:
+            try:
+                self.vdj_engine = VDJRecombinationEngine()
+                logging.info(f"[{account_key}] VDJ feedback engine initialized "
+                             f"({len(self.vdj_engine.memory_cells)} memory cells)")
+            except Exception as e:
+                logging.warning(f"[{account_key}] VDJ engine init failed: {e}")
         self.starting_balance = 0.0
 
     def connect(self) -> bool:
@@ -700,7 +716,7 @@ class AccountTrader:
                 except Exception as e:
                     pass  # Don't let collection errors affect trading
 
-        # Feed closed trade outcomes to TE domestication tracker
+        # Feed closed trade outcomes to TE domestication tracker + VDJ immune memory
         if self.feedback_poller:
             try:
                 outcomes = self.feedback_poller.poll()
@@ -708,6 +724,17 @@ class AccountTrader:
                     logging.info(f"[{self.account_key}] DOMESTICATION: "
                                  f"{'WIN' if o['won'] else 'LOSS'} {o['symbol']} "
                                  f"${o['profit']:.2f} | TEs: {o['te_combo']}")
+                    # Feed to VDJ immune memory
+                    if self.vdj_engine and o.get('active_tes'):
+                        try:
+                            self.vdj_engine.record_live_outcome(
+                                symbol=o['symbol'],
+                                won=o['won'],
+                                profit=o['profit'],
+                                active_tes=o['active_tes'],
+                            )
+                        except Exception as ve:
+                            logging.debug(f"[{self.account_key}] VDJ feedback error: {ve}")
             except Exception as e:
                 logging.debug(f"[{self.account_key}] Feedback poll error: {e}")
 

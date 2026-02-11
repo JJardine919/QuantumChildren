@@ -1118,6 +1118,80 @@ class VDJRecombinationEngine:
             "maturation_improvements": 0,
         }
 
+    def record_live_outcome(self, symbol: str, won: bool, profit: float,
+                             active_tes: List[str]):
+        """
+        Feed a live trade outcome back into the VDJ engine.
+
+        Matches the trade's active TEs to antibodies whose V-segment TE source
+        overlaps. Updates their running stats and re-checks for memory promotion.
+
+        Args:
+            symbol: instrument (e.g. "XAUUSD")
+            won: True if trade was profitable
+            profit: net P/L in dollars
+            active_tes: list of TE names active when trade was placed
+        """
+        if not active_tes:
+            return
+
+        te_set = set(active_tes)
+        matched = []
+
+        for ab in self.active_antibodies:
+            # Match by V-segment TE source
+            v_name = ab.get("v_name", "")
+            te_source = V_SEGMENTS.get(v_name, {}).get("te_source", "")
+            if te_source and te_source in te_set:
+                matched.append(ab)
+
+        if not matched:
+            log.debug("[VDJ-FEEDBACK] No antibody matched TEs: %s", "+".join(sorted(active_tes)))
+            return
+
+        # Update matched antibodies with live outcome
+        for ab in matched:
+            n_trades = ab.get("n_trades", 0) + 1
+            n_wins = ab.get("n_wins", 0) + (1 if won else 0)
+            total_profit = ab.get("total_profit", 0.0) + (profit if profit > 0 else 0)
+            total_loss = ab.get("total_loss", 0.0) + (profit if profit < 0 else 0)
+
+            ab["n_trades"] = n_trades
+            ab["n_wins"] = n_wins
+            ab["total_profit"] = total_profit
+            ab["total_loss"] = total_loss
+
+            # Recompute fitness with updated stats
+            result = {
+                "n_trades": n_trades,
+                "n_wins": n_wins,
+                "total_profit": total_profit,
+                "total_loss": total_loss,
+                "max_drawdown": ab.get("max_drawdown", 0.0),
+                "trade_returns": ab.get("trade_returns", []) + [profit],
+            }
+            ab["trade_returns"] = result["trade_returns"]
+            old_fitness = ab.get("fitness", 0)
+            ab["fitness"] = fitness_clonal_selection(result)
+
+            log.info(
+                "[VDJ-FEEDBACK] %s %s %s: fitness %.3f -> %.3f (%d trades, %d wins)",
+                ab.get("antibody_id", "")[:12],
+                "WIN" if won else "LOSS", symbol,
+                old_fitness, ab["fitness"], n_trades, n_wins,
+            )
+
+        # Re-check for memory promotion on updated antibodies
+        memory_candidates = [
+            ab for ab in matched
+            if ab.get("fitness", 0) >= MEMORY_THRESHOLD
+            and ab.get("maturation_rounds", 0) >= 3
+        ]
+        if memory_candidates:
+            new_memory = self._phase7_memory_promotion(memory_candidates)
+            if new_memory:
+                log.info("[VDJ-FEEDBACK] Live feedback promoted %d memory cells!", len(new_memory))
+
     def _pop_stats(self) -> Dict:
         return {
             "active": len(self.active_antibodies),
