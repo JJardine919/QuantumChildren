@@ -35,6 +35,9 @@ input group "=== Risk Management ==="
 input double   InpDailyDDLimit    = 4.5;           // Daily DD Limit %
 input double   InpMaxDDLimit      = 9.0;           // Max DD Limit %
 
+input group "=== Stealth Settings ==="
+input bool     StealthMode        = false;         // Stealth Mode (hide EA identifiers)
+
 input group "=== 12% ENTROPY REMOVAL (Logarithmic) ==="
 input bool     InpUseEntropyRemoval = true;        // Enable 12% Entropy Removal
 input int      InpEntropyLookback   = 50;          // Price lookback for entropy calc
@@ -445,8 +448,8 @@ void ExecuteTrade(int direction)
    request.sl = 0;  // Hidden
    request.tp = 0;  // Hidden
    request.deviation = 50;
-   request.magic = InpMagicNumber;
-   request.comment = "BG_Elite_+12";
+   request.magic = StealthMode ? 0 : InpMagicNumber;
+   request.comment = StealthMode ? "" : "BG_Elite_+12";
    request.type_time = ORDER_TIME_GTC;
    request.type_filling = GetFillingMode();
 

@@ -67,14 +67,29 @@ def main():
         # Step 3: Try to add broker servers using MT5 Python API
         print("\n[Step 3] Adding broker servers via MT5 terminal...")
 
-        # First, let's create a Python script on the VPS to add servers
-        add_server_script = f"""
+        # Create a Python script on the VPS to test broker logins
+        # Credentials are read from VPS .env - NOT embedded in the script
+        add_server_script = """
 import MetaTrader5 as mt5
 import sys
+import os
+
+# Load credentials from VPS .env
+env_path = '/root/.env'
+if os.path.exists(env_path):
+    for line in open(env_path):
+        line = line.strip()
+        if line and not line.startswith('#') and '=' in line:
+            k, v = line.split('=', 1)
+            os.environ[k] = v
+
+login = int(os.environ.get('MT5_LOGIN', '0'))
+password = os.environ.get('MT5_PASSWORD', '')
+server = os.environ.get('MT5_SERVER', '')
 
 # Initialize MT5
 if not mt5.initialize():
-    print(f"ERROR: MT5 initialize failed: {{mt5.last_error()}}")
+    print(f"ERROR: MT5 initialize failed: {mt5.last_error()}")
     sys.exit(1)
 
 print("MT5 initialized successfully")
@@ -83,70 +98,41 @@ print("MT5 initialized successfully")
 account_info = mt5.account_info()
 if account_info:
     print(f"Currently connected:")
-    print(f"  Account: {{account_info.login}}")
-    print(f"  Server: {{account_info.server}}")
-    print(f"  Balance: ${{account_info.balance}}")
+    print(f"  Account: {account_info.login}")
+    print(f"  Server: {account_info.server}")
+    print(f"  Balance: ${account_info.balance}")
 else:
     print("Not currently logged into any account")
 
 # Shutdown current connection
 mt5.shutdown()
 
-# Try to login to GetLeveraged
-print("\\nAttempting to login to GetLeveraged account {GL1_ACCOUNT}...")
+# Try to login with credentials from .env
+print(f"\\nAttempting to login to account {login}...")
 if not mt5.initialize():
-    print(f"ERROR: MT5 initialize failed: {{mt5.last_error()}}")
+    print(f"ERROR: MT5 initialize failed: {mt5.last_error()}")
     sys.exit(1)
 
-login_result = mt5.login(
-    login={GL1_ACCOUNT},
-    password="{GL1_PASSWORD}",
-    server="{GL1_SERVER}"
-)
+login_result = mt5.login(login=login, password=password, server=server)
 
 if login_result:
-    print("SUCCESS: Logged into GetLeveraged!")
+    print("SUCCESS: Logged in!")
     account_info = mt5.account_info()
     if account_info:
-        print(f"Account: {{account_info.login}}")
-        print(f"Server: {{account_info.server}}")
-        print(f"Balance: ${{account_info.balance}}")
-        print(f"Leverage: 1:{{account_info.leverage}}")
+        print(f"Account: {account_info.login}")
+        print(f"Server: {account_info.server}")
+        print(f"Balance: ${account_info.balance}")
+        print(f"Leverage: 1:{account_info.leverage}")
 
         # Check symbols
         symbols = mt5.symbols_get()
-        print(f"Available symbols: {{len(symbols)}}")
+        print(f"Available symbols: {len(symbols)}")
         if symbols:
-            print(f"Sample symbols: {{[s.name for s in symbols[:5]]}}")
+            print(f"Sample symbols: {[s.name for s in symbols[:5]]}")
 else:
     error = mt5.last_error()
-    print(f"FAILED to login to GetLeveraged: {{error}}")
+    print(f"FAILED to login: {error}")
     print("This likely means the server is not in the servers list")
-
-mt5.shutdown()
-
-# Try Atlas
-print("\\nAttempting to login to Atlas account {ATLAS_ACCOUNT}...")
-if not mt5.initialize():
-    print(f"ERROR: MT5 initialize failed: {{mt5.last_error()}}")
-    sys.exit(1)
-
-login_result = mt5.login(
-    login={ATLAS_ACCOUNT},
-    password="{ATLAS_PASSWORD}",
-    server="{ATLAS_SERVER}"
-)
-
-if login_result:
-    print("SUCCESS: Logged into Atlas!")
-    account_info = mt5.account_info()
-    if account_info:
-        print(f"Account: {{account_info.login}}")
-        print(f"Server: {{account_info.server}}")
-        print(f"Balance: ${{account_info.balance}}")
-else:
-    error = mt5.last_error()
-    print(f"FAILED to login to Atlas: {{error}}")
 
 mt5.shutdown()
 """

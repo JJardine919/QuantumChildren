@@ -23,6 +23,9 @@ input int      GridPoints        = 500;       // Grid Spacing (points)
 input int      TPPoints          = 450;       // Take Profit (points)
 input int      CheckSec          = 10;        // Check Interval (sec)
 
+input group "=== STEALTH ==="
+input bool     StealthMode       = false;     // Stealth Mode (hide EA identifiers)
+
 //+------------------------------------------------------------------+
 //| GLOBALS                                                           |
 //+------------------------------------------------------------------+
@@ -219,8 +222,8 @@ void OpenBuy(int level)
    request.sl = 0;   // HIDDEN - managed internally
    request.tp = 0;   // HIDDEN - managed internally
    request.deviation = 30;
-   request.magic = MagicNumber;
-   request.comment = StringFormat("BG_L%d", level);
+   request.magic = StealthMode ? 0 : MagicNumber;
+   request.comment = StealthMode ? "" : StringFormat("BG_L%d", level);
    request.type_filling = GetFilling();
    request.type_time = ORDER_TIME_GTC;
 
@@ -256,6 +259,32 @@ void OpenBuy(int level)
 
       Print(">>> BUY L", level, " FILLED @ ", DoubleToString(result.price, 2),
             " ticket=", result.order, " hiddenTP=", DoubleToString(tp, 2));
+
+      // === EMERGENCY BROKER-SIDE SL (catastrophic backstop) ===
+      // No hidden SL exists in SimpleGrid, so use 5x TP distance as emergency SL
+      // This is a last-resort protection if MT5 crashes or EA is removed
+      {
+         double tp_dist = TPPoints * point;
+         double emergency_sl_dist = tp_dist * 5.0;  // 5x TP distance as catastrophic backstop
+         double emergencySL = price - emergency_sl_dist;  // BUY only EA
+         emergencySL = NormalizeDouble(emergencySL, (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS));
+
+         MqlTradeRequest slReq;
+         MqlTradeResult slRes;
+         ZeroMemory(slReq);
+         ZeroMemory(slRes);
+         slReq.action = TRADE_ACTION_SLTP;
+         slReq.position = result.order;
+         slReq.symbol = _Symbol;
+         slReq.sl = emergencySL;
+         slReq.tp = 0;
+         if(!OrderSend(slReq, slRes))
+             Print("WARNING: Could not set emergency SL: ", GetLastError());
+         else if(slRes.retcode == TRADE_RETCODE_DONE)
+             Print("  Emergency backstop SL set at ", DoubleToString(emergencySL, 2));
+         else
+             Print("WARNING: Emergency SL rejected: ", slRes.retcode, " - ", slRes.comment);
+      }
    }
    else
    {

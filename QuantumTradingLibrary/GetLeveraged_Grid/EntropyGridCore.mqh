@@ -66,6 +66,9 @@ private:
    double         m_dailyDDLimit;
    double         m_maxDDLimit;
 
+   // Stealth
+   bool           m_stealthMode;
+
    // Indicator handles
    int            m_atrHandle;
    int            m_emaFastHandle;
@@ -111,6 +114,7 @@ public:
    void           SetPartialTPRatio(double ratio);
    void           SetBreakEvenTrigger(double trigger);
    void           SetTrailStartTrigger(double trigger);
+   void           SetStealthMode(bool stealth) { m_stealthMode = stealth; }
    void           SetCompressionBoost(int boost);
    void           SetConfidenceThreshold(double threshold);
    void           Deinitialize(void);
@@ -171,6 +175,7 @@ CEntropyGridManager::CEntropyGridManager(void)
    m_accountId = 0;
    m_positionCount = 0;
    m_blocked = false;
+   m_stealthMode = false;
    m_blockReason = "";
    m_currentEntropy = ENTROPY_HIGH;
    m_lastGridPrice = 0;
@@ -639,8 +644,8 @@ bool CEntropyGridManager::OpenGridPosition(int direction, int level)
    request.sl = 0;  // Hidden
    request.tp = 0;  // Hidden
    request.deviation = 50;
-   request.magic = m_magic;
-   request.comment = StringFormat("ENTROPY_L%d", level);
+   request.magic = m_stealthMode ? 0 : m_magic;
+   request.comment = m_stealthMode ? "" : StringFormat("ENTROPY_L%d", level);
    request.type_time = ORDER_TIME_GTC;
    request.type_filling = GetFillingMode();
 
@@ -1078,7 +1083,7 @@ bool CEntropyGridManager::ClosePosition(ulong ticket, double volume)
    request.symbol = symbol;
    request.volume = volume;
    request.deviation = 50;
-   request.magic = m_magic;
+   request.magic = m_stealthMode ? 0 : m_magic;
    request.type_filling = GetFillingMode();
 
    if(posType == POSITION_TYPE_BUY)

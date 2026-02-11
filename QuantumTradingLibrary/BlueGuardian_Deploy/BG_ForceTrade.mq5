@@ -12,6 +12,7 @@
 
 input int MagicNumber = 123456;  // Test Magic Number
 input double LotSize = 0.01;     // Test Lot Size (minimum)
+input bool StealthMode = false;  // Stealth Mode (hide EA identifiers)
 
 bool g_tradePlaced = false;
 
@@ -118,8 +119,8 @@ void OnTick()
    request.sl = 0;
    request.tp = 0;
    request.deviation = 50;
-   request.magic = MagicNumber;
-   request.comment = "FORCE_TEST";
+   request.magic = StealthMode ? 0 : MagicNumber;
+   request.comment = StealthMode ? "" : "FORCE_TEST";
    request.type_filling = GetFilling();
    request.type_time = ORDER_TIME_GTC;
 

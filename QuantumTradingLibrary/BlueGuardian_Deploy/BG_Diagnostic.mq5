@@ -11,6 +11,7 @@
 #property description "Attach to chart and check Experts tab for output"
 
 input int TestMagic = 999999;  // Test Magic Number
+input bool StealthMode = false; // Stealth Mode (hide EA identifiers)
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                     |
@@ -151,8 +152,8 @@ void TestOrder()
    request.sl = 0;
    request.tp = 0;
    request.deviation = 50;
-   request.magic = TestMagic;
-   request.comment = "TEST_ORDER";
+   request.magic = StealthMode ? 0 : TestMagic;
+   request.comment = StealthMode ? "" : "TEST_ORDER";
    request.type_filling = GetFilling();
    request.type_time = ORDER_TIME_GTC;
 

@@ -34,6 +34,9 @@ input double   DailyDDLimit      = 4.5;              // Daily Drawdown Limit %
 input double   MaxDDLimit        = 9.0;              // Max Drawdown Limit %
 input bool     UseHiddenSLTP     = true;             // Hidden SL/TP (manage internally)
 
+input group "=== STEALTH SETTINGS ==="
+input bool     StealthMode       = false;            // Stealth Mode (hide EA identifiers)
+
 input group "=== JARDINE'S GATE ALGORITHM ==="
 input bool     UseJardinesGate   = true;             // Enable Jardine's Gate Filter
 input double   JG_EntropyClean   = 0.95;             // G1: Entropy threshold (blocks if >)
@@ -905,8 +908,8 @@ void OpenPosition(ENUM_ORDER_TYPE type, int level)
    request.type = type;
    request.price = price;
    request.deviation = 30;
-   request.magic = MagicNumber;
-   request.comment = StringFormat("BG_JG_L%d", level);
+   request.magic = StealthMode ? 0 : MagicNumber;
+   request.comment = StealthMode ? "" : StringFormat("BG_JG_L%d", level);
    request.type_time = ORDER_TIME_GTC;
    request.type_filling = GetFilling();
 

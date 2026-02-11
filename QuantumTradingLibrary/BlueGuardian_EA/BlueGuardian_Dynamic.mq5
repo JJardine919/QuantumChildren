@@ -38,6 +38,9 @@ input group "=== Risk Management ==="
 input double   InpDailyDDLimit    = 4.5;           // Daily DD Limit %
 input double   InpMaxDDLimit      = 9.0;           // Max DD Limit %
 
+input group "=== Weekend Protection ==="
+input bool     WeekendCloseEnabled = true;         // Close positions before weekend
+
 input group "=== Signal Settings ==="
 input int      InpEMAFast         = 8;             // Fast EMA
 input int      InpEMASlow         = 21;            // Slow EMA
@@ -282,6 +285,9 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   // Weekend close check - BEFORE any trade logic
+   CheckWeekendClose();
+
    // Update high water mark on every tick
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -892,6 +898,28 @@ void CheckDailyReset()
       g_lastDayReset = TimeCurrent();
       g_blocked = false;
       Print("Daily reset. Balance: $", DoubleToString(g_dailyStartBalance, 2));
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Weekend close - close all positions before Friday market close    |
+//+------------------------------------------------------------------+
+void CheckWeekendClose()
+{
+   if(!WeekendCloseEnabled) return;
+
+   // Skip for crypto symbols (24/7 markets)
+   string sym = g_symbol;
+   if(StringFind(sym, "BTC") >= 0 || StringFind(sym, "ETH") >= 0 ||
+      StringFind(sym, "LTC") >= 0 || StringFind(sym, "XRP") >= 0) return;
+
+   MqlDateTime dt;
+   TimeCurrent(dt);
+
+   // Friday = day_of_week 5, close by 16:45 server time
+   if(dt.day_of_week == 5 && (dt.hour > 16 || (dt.hour == 16 && dt.min >= 45)))
+   {
+      CloseAllPositions("Weekend Close - Friday 16:45+");
    }
 }
 

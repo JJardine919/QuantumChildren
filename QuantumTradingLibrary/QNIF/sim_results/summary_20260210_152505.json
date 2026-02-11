@@ -1,0 +1,20 @@
+{
+  "timestamp": "20260210_152505",
+  "simulation_days": 21,
+  "btc": {
+    "accounts": 10,
+    "passed": 8,
+    "failed": 10,
+    "total_profit": 13593.700872142814,
+    "avg_win_rate": 45.88557001146966,
+    "total_trades": 3895
+  },
+  "eth": {
+    "accounts": 10,
+    "passed": 0,
+    "failed": 0,
+    "total_profit": 1222.45159285716,
+    "avg_win_rate": 45.41240973712375,
+    "total_trades": 7508
+  }
+}

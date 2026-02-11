@@ -81,6 +81,13 @@ try:
 except ImportError:
     TEQA_ENABLED = False
 
+# QNIF quantum-immune signal bridge (Hybrid Veto authority)
+try:
+    from qnif_bridge import QNIFBridge
+    QNIF_ENABLED = True
+except ImportError:
+    QNIF_ENABLED = False
+
 # ============================================================
 # SINGLE ACCOUNT - Credentials from .env via credential_manager
 # ============================================================
@@ -318,6 +325,7 @@ class InstantTrader:
     def __init__(self):
         self.expert_loader = ExpertLoader()
         self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
+        self.qnif_bridge = QNIFBridge() if QNIF_ENABLED else None
         self.connected = False
 
     def connect(self) -> bool:
@@ -694,6 +702,15 @@ class InstantTrader:
                 action = action_map.get(final_act, Action.HOLD)
                 confidence = final_conf
                 logging.info(f"[{symbol}] {teqa_reason}")
+
+            # Apply QNIF Hybrid Veto (has override authority over TEQA/LSTM)
+            if self.qnif_bridge is not None and action is not None:
+                final_act, final_conf, lot_mult, qnif_reason = \
+                    self.qnif_bridge.apply_hybrid_veto(action.name, confidence, symbol=symbol)
+                action_map = {'BUY': Action.BUY, 'SELL': Action.SELL, 'HOLD': Action.HOLD}
+                action = action_map.get(final_act, Action.HOLD)
+                confidence = final_conf
+                logging.info(f"[{symbol}] {qnif_reason}")
 
             if regime == Regime.CLEAN and action in [Action.BUY, Action.SELL]:
                 self.execute_trade(symbol, action)

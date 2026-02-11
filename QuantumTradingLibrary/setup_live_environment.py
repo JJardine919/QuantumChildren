@@ -92,33 +92,44 @@ timeout 10 python3 etare_signal_generator.py 2>&1 | head -50
         if error.strip():
             print(f"Error: {error}")
 
-        # Step 6: Test MT5 connection
+        # Step 6: Test MT5 connection (reads credentials from VPS .env)
         print("\n[Step 6] Testing MT5 connection...")
-        test_script = f"""
+        test_script = """
 import MetaTrader5 as mt5
+import os
+
+# Load credentials from VPS .env
+for line in open('/root/.env'):
+    line = line.strip()
+    if line and not line.startswith('#') and '=' in line:
+        k, v = line.split('=', 1)
+        os.environ[k] = v
+
+login = int(os.environ.get('MT5_LOGIN', '0'))
+password = os.environ.get('MT5_PASSWORD', '')
+server = os.environ.get('MT5_SERVER', '')
 
 print("Initializing MT5...")
 if mt5.initialize():
     print("MT5 initialized successfully!")
 
-    # Try to login with GetLeveraged
-    print("\\nAttempting login to GetLeveraged ({GL1_ACCOUNT})...")
-    if mt5.login(login={GL1_ACCOUNT}, password="{GL1_PASSWORD}", server="{GL1_SERVER}"):
-        print("SUCCESS: Logged into GetLeveraged!")
+    print(f"\\nAttempting login to account {login}...")
+    if mt5.login(login=login, password=password, server=server):
+        print("SUCCESS: Logged in!")
         account_info = mt5.account_info()
         if account_info:
-            print(f"Account: {{account_info.login}}")
-            print(f"Server: {{account_info.server}}")
-            print(f"Balance: ${{account_info.balance}}")
-            print(f"Leverage: 1:{{account_info.leverage}}")
+            print(f"Account: {account_info.login}")
+            print(f"Server: {account_info.server}")
+            print(f"Balance: ${account_info.balance}")
+            print(f"Leverage: 1:{account_info.leverage}")
     else:
         error = mt5.last_error()
-        print(f"FAILED to login: {{error}}")
+        print(f"FAILED to login: {error}")
         print("Note: Server may not be in servers list")
 
     mt5.shutdown()
 else:
-    print(f"Failed to initialize MT5: {{mt5.last_error()}}")
+    print(f"Failed to initialize MT5: {mt5.last_error()}")
 """
         output, error, code = execute_command(ssh,
             f"cd /root && DISPLAY=:0 python3 -c '{test_script}'", timeout=30)

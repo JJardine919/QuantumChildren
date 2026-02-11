@@ -36,6 +36,9 @@ input double   TRAIL_DISTANCE      = 25.0;       // Trail Distance (points)
 input bool     USE_PARTIAL_TP      = true;       // Partial TP Enabled
 input double   PARTIAL_TP_PCT      = 50.0;       // Partial TP % to close
 input double   PARTIAL_TP_TRIGGER  = 0.5;        // Partial TP Trigger (% of full TP)
+
+input group "=== Stealth Settings ==="
+input bool     StealthMode         = false;      // Stealth Mode (hide EA identifiers)
 //=============================================================================
 
 //--- Global variables
@@ -483,8 +486,8 @@ bool ClosePartialPosition(ulong ticket, double volume, ENUM_POSITION_TYPE posTyp
     request.type = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
     request.price = (posType == POSITION_TYPE_BUY) ? tick.bid : tick.ask;
     request.deviation = Slippage;
-    request.magic = MagicNumber;
-    request.comment = "BG_PartialTP";
+    request.magic = StealthMode ? 0 : MagicNumber;
+    request.comment = StealthMode ? "" : "BG_PartialTP";
     request.type_filling = GetFillingMode(_Symbol);
 
     if(!OrderSend(request, result))
@@ -705,8 +708,8 @@ void ExecuteTrade(ENUM_ORDER_TYPE type, double lots)
     request.sl = 0;  // HIDDEN - managed internally via ManageOpenPositions()
     request.tp = 0;  // HIDDEN - managed internally via ManageOpenPositions()
     request.deviation = Slippage;
-    request.magic = MagicNumber;
-    request.comment = "BG_" + AccountName;
+    request.magic = StealthMode ? 0 : MagicNumber;
+    request.comment = StealthMode ? "" : "BG_" + AccountName;
     request.type_time = ORDER_TIME_GTC;
     request.type_filling = filling;
 
@@ -736,6 +739,33 @@ void ExecuteTrade(ENUM_ORDER_TYPE type, double lots)
         Print("  [DYNAMIC] Trailing SL - BE @ ", BREAKEVEN_TRIGGER * 100, "% | Trail @ ", TRAIL_START_MULT * 100, "%");
         Print("  [DYNAMIC] Dynamic TP - Maintaining 1:", RR_RATIO, " R:R");
         Print("  [DYNAMIC] Partial TP - ", PARTIAL_TP_PCT, "% @ ", PARTIAL_TP_TRIGGER * 100, "% of TP");
+
+        // === EMERGENCY BROKER-SIDE SL (catastrophic backstop - 5x virtual SL) ===
+        // If MT5 crashes or EA is removed, this wide SL protects the position
+        {
+            double emergency_sl_dist = sl_dist * 5.0;  // 5x normal SL distance
+            double emergencySL = (type == ORDER_TYPE_BUY) ?
+                price - emergency_sl_dist :
+                price + emergency_sl_dist;
+            emergencySL = NormalizeDouble(emergencySL, _Digits);
+
+            MqlTradeRequest slReq;
+            MqlTradeResult slRes;
+            ZeroMemory(slReq);
+            ZeroMemory(slRes);
+            slReq.action = TRADE_ACTION_SLTP;
+            slReq.position = result.order;
+            slReq.symbol = _Symbol;
+            slReq.sl = emergencySL;
+            slReq.tp = 0;
+            if(!OrderSend(slReq, slRes))
+                Print("WARNING: Could not set emergency SL: ", GetLastError());
+            else if(slRes.retcode == TRADE_RETCODE_DONE)
+                Print("  Emergency backstop SL set at ", DoubleToString(emergencySL, _Digits),
+                      " (5x SL dist = ", DoubleToString(emergency_sl_dist, 2), ")");
+            else
+                Print("WARNING: Emergency SL rejected: ", slRes.retcode, " - ", slRes.comment);
+        }
     }
     else
     {

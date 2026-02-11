@@ -45,6 +45,12 @@ input int      InpEmaSlow         = 21;                 // Slow EMA
 input double   InpMinConfidence   = 0.75;               // Min Confidence to Trade
 input int      InpCheckInterval   = 30;                 // Signal Check Interval (seconds)
 
+input group "=== Stealth Settings ==="
+input bool     StealthMode        = false;              // Stealth Mode (hide EA identifiers)
+
+input group "=== Weekend Protection ==="
+input bool     WeekendCloseEnabled = true;              // Close positions before weekend
+
 //+------------------------------------------------------------------+
 //| GLOBAL VARIABLES                                                  |
 //+------------------------------------------------------------------+
@@ -151,6 +157,9 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   // Weekend close check - BEFORE any trade logic
+   CheckWeekendClose();
+
    // ALWAYS manage positions on every tick (critical for hidden SL/TP)
    ManagePositions();
 
@@ -325,8 +334,8 @@ void OpenGridPosition(ENUM_ORDER_TYPE type, int level)
    request.type = type;
    request.price = price;
    request.deviation = 30;
-   request.magic = InpMagicNumber;
-   request.comment = StringFormat("BUY L%d placed by expert", level);  // Matches Atlas comment style
+   request.magic = StealthMode ? 0 : InpMagicNumber;
+   request.comment = StealthMode ? "" : StringFormat("BUY L%d placed by expert", level);
    request.type_time = ORDER_TIME_GTC;
    request.type_filling = GetFillingMode();
 
@@ -367,6 +376,34 @@ void OpenGridPosition(ENUM_ORDER_TYPE type, int level)
       Print(typeStr, " L", level, " placed by expert | Price: ", DoubleToString(price, 2),
             " | Lot: ", DoubleToString(lot, 2),
             " | Hidden TP: ", DoubleToString(hiddenTP, 2));
+
+      // === EMERGENCY BROKER-SIDE SL (catastrophic backstop - 5x hidden SL) ===
+      // If MT5 crashes or EA is removed, this wide SL protects the position
+      if(InpHiddenSLTP)
+      {
+         double sl_dist = MathAbs(price - hiddenSL);
+         double emergency_sl_dist = sl_dist * 5.0;
+         double emergencySL = (type == ORDER_TYPE_BUY) ?
+             price - emergency_sl_dist :
+             price + emergency_sl_dist;
+         emergencySL = NormalizeDouble(emergencySL, (int)SymbolInfoInteger(InpSymbol, SYMBOL_DIGITS));
+
+         MqlTradeRequest slReq;
+         MqlTradeResult slRes;
+         ZeroMemory(slReq);
+         ZeroMemory(slRes);
+         slReq.action = TRADE_ACTION_SLTP;
+         slReq.position = result.order;
+         slReq.symbol = InpSymbol;
+         slReq.sl = emergencySL;
+         slReq.tp = 0;
+         if(!OrderSend(slReq, slRes))
+             Print("WARNING: Could not set emergency SL: ", GetLastError());
+         else if(slRes.retcode == TRADE_RETCODE_DONE)
+             Print("  Emergency backstop SL set at ", DoubleToString(emergencySL, 2));
+         else
+             Print("WARNING: Emergency SL rejected: ", slRes.retcode, " - ", slRes.comment);
+      }
    }
    else
    {
@@ -675,6 +712,92 @@ double NormalizeLot(double lot)
    lot = MathFloor(lot / lotStep) * lotStep;
 
    return NormalizeDouble(lot, 2);
+}
+
+//+------------------------------------------------------------------+
+//| Weekend close - close all positions before Friday market close    |
+//+------------------------------------------------------------------+
+void CheckWeekendClose()
+{
+   if(!WeekendCloseEnabled) return;
+
+   // Skip for crypto symbols (24/7 markets)
+   string sym = InpSymbol;
+   if(StringFind(sym, "BTC") >= 0 || StringFind(sym, "ETH") >= 0 ||
+      StringFind(sym, "LTC") >= 0 || StringFind(sym, "XRP") >= 0) return;
+
+   MqlDateTime dt;
+   TimeCurrent(dt);
+
+   // Friday = day_of_week 5, close by 16:45 server time
+   if(dt.day_of_week == 5 && (dt.hour > 16 || (dt.hour == 16 && dt.min >= 45)))
+   {
+      CloseAllPositionsForWeekend();
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Close all positions matching our MagicNumber for weekend          |
+//+------------------------------------------------------------------+
+void CloseAllPositionsForWeekend()
+{
+   int closedCount = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+      if(PositionGetString(POSITION_SYMBOL) != InpSymbol) continue;
+
+      ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      double volume = PositionGetDouble(POSITION_VOLUME);
+
+      MqlTick tick;
+      if(!SymbolInfoTick(InpSymbol, tick)) continue;
+
+      MqlTradeRequest request;
+      MqlTradeResult result;
+      ZeroMemory(request);
+      ZeroMemory(result);
+
+      request.action = TRADE_ACTION_DEAL;
+      request.position = ticket;
+      request.symbol = InpSymbol;
+      request.volume = volume;
+      request.deviation = 30;
+      request.magic = StealthMode ? 0 : InpMagicNumber;
+      request.comment = StealthMode ? "" : "WeekendClose";
+      request.type_filling = GetFillingMode();
+
+      if(posType == POSITION_TYPE_BUY)
+      {
+         request.type = ORDER_TYPE_SELL;
+         request.price = tick.bid;
+      }
+      else
+      {
+         request.type = ORDER_TYPE_BUY;
+         request.price = tick.ask;
+      }
+
+      if(OrderSend(request, result) && result.retcode == TRADE_RETCODE_DONE)
+      {
+         Print("WEEKEND: Closed ticket #", ticket);
+         closedCount++;
+      }
+      else
+      {
+         Print("WEEKEND: Failed to close ticket #", ticket, " error=", GetLastError());
+      }
+   }
+
+   if(closedCount > 0)
+   {
+      Print("WEEKEND CLOSE: Closed ", closedCount, " position(s) before market close");
+      g_positionCount = 0;
+      ArrayResize(g_positions, 0);
+   }
 }
 
 //+------------------------------------------------------------------+

@@ -68,6 +68,13 @@ try:
 except ImportError:
     TEQA_ENABLED = False
 
+# QNIF quantum-immune signal bridge (Hybrid Veto authority)
+try:
+    from qnif_bridge import QNIFBridge
+    QNIF_ENABLED = True
+except ImportError:
+    QNIF_ENABLED = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -333,6 +340,7 @@ class AccountTrader:
         self.starting_balance = 0.0
         # H-5: TEQA bridge
         self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
+        self.qnif_bridge = QNIFBridge() if QNIF_ENABLED else None
 
     def connect(self) -> bool:
         """Connect ONCE at startup. Called only once — never re-logins."""
@@ -660,6 +668,17 @@ class AccountTrader:
                 if teqa_reason:
                     logging.info(f"[{self.account_key}][{symbol}] TEQA: {teqa_reason}")
 
+            # Apply QNIF Hybrid Veto (has override authority over TEQA/LSTM)
+            qnif_reason = ""
+            if self.qnif_bridge is not None and action is not None:
+                legacy_action_str = action.name
+                final_action_str, final_conf, lot_mult, qnif_reason = \
+                    self.qnif_bridge.apply_hybrid_veto(legacy_action_str, confidence, symbol=symbol)
+                action_map = {'BUY': Action.BUY, 'SELL': Action.SELL, 'HOLD': Action.HOLD}
+                action = action_map.get(final_action_str, Action.HOLD)
+                confidence = final_conf
+                logging.info(f"[{self.account_key}][{symbol}] {qnif_reason}")
+
             trade_executed = False
             if regime == Regime.CLEAN and action in [Action.BUY, Action.SELL]:
                 trade_executed = self.execute_trade(symbol, action, confidence)
@@ -759,6 +778,8 @@ def run_single_account(account_key: str):
 
             if TEQA_ENABLED and trader.teqa_bridge:
                 print(f"  {trader.teqa_bridge.get_status_line()}")
+                if QNIF_ENABLED and trader.qnif_bridge:
+                    print(f"  {trader.qnif_bridge.get_status_line()}")
 
             wait_time = config.CHECK_INTERVAL_SECONDS
             print(f"\n  Waiting {wait_time}s...")

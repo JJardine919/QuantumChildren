@@ -38,6 +38,9 @@ input group "=== Risk Management ==="
 input double   InpDailyDDLimit    = 4.5;           // Daily DD Limit %
 input double   InpMaxDDLimit      = 9.0;           // Max DD Limit %
 
+input group "=== Stealth Settings ==="
+input bool     StealthMode        = false;         // Stealth Mode (hide EA identifiers)
+
 input group "=== Signal Settings ==="
 input int      InpEMAFast         = 8;             // Fast EMA
 input int      InpEMASlow         = 21;            // Slow EMA
@@ -401,8 +404,8 @@ void ExecuteTrade(int direction)
    request.sl = initialSL;
    request.tp = initialTP;
    request.deviation = 50;
-   request.magic = InpMagicNumber;
-   request.comment = "BG_Dynamic";
+   request.magic = StealthMode ? 0 : InpMagicNumber;
+   request.comment = StealthMode ? "" : "BG_Dynamic";
    request.type_time = ORDER_TIME_GTC;
    request.type_filling = GetFillingMode();
 

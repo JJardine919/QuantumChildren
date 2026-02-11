@@ -131,6 +131,9 @@ private:
    // Entropy calculation
    double           m_entropyBuffer[];
 
+   // Stealth
+   bool             m_stealthMode;
+
 public:
    //--- Constructor/Destructor
    CXAUGridManager(void);
@@ -139,6 +142,7 @@ public:
    //--- Initialization
    bool     Initialize(int magic, ENUM_XAUUSD_REGIME regime);
    void     SetConfig(XAUGridConfig &config);
+   void     SetStealthMode(bool stealth) { m_stealthMode = stealth; }
    void     Deinitialize(void);
 
    //--- Core Operations
@@ -192,6 +196,7 @@ CXAUGridManager::CXAUGridManager(void)
    m_magicNumber = 0;
    m_symbol = "XAUUSD";
    m_regime = XAUUSD_REGIME_NEUTRAL;
+   m_stealthMode = false;
    m_atrHandle = INVALID_HANDLE;
    m_emaFastHandle = INVALID_HANDLE;
    m_emaSlowHandle = INVALID_HANDLE;
@@ -699,8 +704,8 @@ bool CXAUGridManager::OpenGridOrder(int direction, int gridLevel)
    request.sl = 0;  // HIDDEN - managed internally
    request.tp = 0;  // HIDDEN - managed internally
    request.deviation = 50;
-   request.magic = m_magicNumber;
-   request.comment = StringFormat("XAUG_%d_L%d", m_magicNumber, gridLevel);
+   request.magic = m_stealthMode ? 0 : m_magicNumber;
+   request.comment = m_stealthMode ? "" : StringFormat("XAUG_%d_L%d", m_magicNumber, gridLevel);
    request.type_time = ORDER_TIME_GTC;
    request.type_filling = ORDER_FILLING_IOC;
 
@@ -1167,7 +1172,7 @@ bool CXAUGridManager::ClosePosition(ulong ticket, double volume)
    request.symbol = symbol;
    request.volume = volume;
    request.deviation = 50;
-   request.magic = m_magicNumber;
+   request.magic = m_stealthMode ? 0 : m_magicNumber;
    request.type_filling = ORDER_FILLING_IOC;
 
    if(posType == POSITION_TYPE_BUY)

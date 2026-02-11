@@ -38,6 +38,9 @@ input double   MinConfidence     = 0.3;                // Min Confidence
 input group "=== COMPETITION MODE ==="
 input bool     IgnoreDrawdown    = true;               // Ignore Drawdown Limits
 input bool     ScaleOnWins       = true;               // Increase lots on wins
+
+input group "=== STEALTH SETTINGS ==="
+input bool     StealthMode       = false;              // Stealth Mode (hide EA identifiers)
 input double   WinScaleFactor    = 1.2;                // Scale factor on wins
 
 //+------------------------------------------------------------------+
@@ -248,8 +251,8 @@ void OpenPosition(ENUM_ORDER_TYPE type, int level)
    request.type         = type;
    request.price        = price;
    request.deviation    = 50;
-   request.magic        = MagicNumber;
-   request.comment      = StringFormat("COMP_L%d", level);
+   request.magic        = StealthMode ? 0 : MagicNumber;
+   request.comment      = StealthMode ? "" : StringFormat("COMP_L%d", level);
    request.type_time    = ORDER_TIME_GTC;
    request.type_filling = GetFilling();
    request.sl           = sl;

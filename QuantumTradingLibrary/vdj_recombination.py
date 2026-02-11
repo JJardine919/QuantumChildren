@@ -3,760 +3,156 @@ VDJ RECOMBINATION ENGINE -- Adaptive Immune Trading System
 ============================================================
 Domesticated Transib transposon -> RAG1/RAG2 V(D)J recombination.
 
-Biological basis:
-    RAG1/RAG2 is a domesticated Transib DNA transposon (TE family #24 in
-    our system) that became the foundation of the vertebrate adaptive
-    immune system ~500 million years ago. It works by:
-
-    1. V(D)J Recombination: Randomly selecting one V (Variable), one D
-       (Diversity), and one J (Joining) gene segment from large pools
-    2. Junctional Diversity: Adding random nucleotides at V-D and D-J
-       junctions during the cutting/joining process
-    3. Clonal Selection: Testing billions of unique antibodies against
-       pathogens -- winners survive, losers undergo apoptosis
-    4. Affinity Maturation: Somatic hypermutation in germinal centers
-       optimizes the binding affinity of surviving antibodies
-    5. Memory B Cells: The best antibodies are stored permanently for
-       rapid recall upon re-exposure
-
-Trading translation:
-    V segments = entry signal generators (RSI, MACD, Stoch, BB, etc.)
-    D segments = market regime classifiers (trending, ranging, volatile)
-    J segments = exit strategies (trailing, partial, time-based, etc.)
-    "Antibody" = unique V+D+J combination = a micro-strategy
-    Junctional diversity = random parameter offsets at combination points
-    Clonal selection = backtest all antibodies, kill losers, clone winners
-    Affinity maturation = mutate parameters of winning strategies
-    Memory B cells = persistent database of winning V+D+J combos
+9-Phase Algorithm:
+    Phase 0: TRIM28 emergency suppression check
+    Phase 1: Memory B cell recall (secondary immune response)
+    Phase 2: Bone marrow -- quantum-guided antibody generation
+    Phase 3: Thymic negative selection (risk management filter)
+    Phase 4: Antigen exposure (walk-forward backtesting)
+    Phase 5: Clonal selection (kill losers, clone winners)
+    Phase 6: Affinity maturation (somatic hypermutation)
+    Phase 7: Memory B cell promotion
+    Phase 8: Consensus signal generation
+    -- Phase 9 (generation advancement) is implicit --
 
 Integration:
     - Reads TE activations from TEActivationEngine (33 families)
-    - Stores antibodies in SQLite alongside domestication DB
-    - Feeds winning antibody signals into TEQAv3Engine pipeline
-    - MQL5 EA reads antibody consensus via JSON signal file
+    - Uses 16-qubit quantum circuit for segment selection
+    - Uses 6-component fitness function with Bayesian priors
+    - Stores antibodies in SQLite (vdj_memory_cells.db)
+    - Feeds winning signals into TEQAv3Engine via JSON signal file
+    - Registers domesticated patterns in TEDomesticationTracker
 
 Authors: DooDoo + Claude
-Date:    2026-02-08
-Version: VDJ-RECOMBINATION-1.0
+Date:    2026-02-09
+Version: VDJ-RECOMBINATION-2.0
 """
 
-import json
-import math
-import os
-import random
-import logging
-import sqlite3
 import hashlib
+import json
+import logging
+import os
+import sqlite3
 import time
 from copy import deepcopy
-from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import Dict, List, Optional
 
 import numpy as np
 
-# Import from existing TEQA system
-from teqa_v3_neural_te import (
-    ALL_TE_FAMILIES,
-    TEActivationEngine,
-    TEClass,
-    N_QUBITS,
+# VDJ subsystem imports
+from vdj_segments import (
+    V_SEGMENTS, D_SEGMENTS, J_SEGMENTS,
+    V_RSS, D_RSS, J_RSS,
+    V_NAMES, D_NAMES, J_NAMES,
+    N_V, N_D, N_J,
+    rss_compatible,
+)
+from vdj_quantum_circuit import execute_vdj_circuit
+from vdj_fitness import (
+    fitness_clonal_selection,
+    compute_detailed_metrics,
+    clonal_selection as classify_population,
+    affinity_maturation as mutate_winner,
+    thymic_selection,
+    APOPTOSIS_THRESHOLD, SURVIVAL_THRESHOLD,
+    PROLIFERATION_THRESHOLD, MEMORY_THRESHOLD,
+    MAX_ACTIVE_ANTIBODIES, MIN_ACTIVE_ANTIBODIES,
+    GENERATION_SIZE, EVALUATION_WINDOW_BARS,
+    DOMESTICATION_EXPIRY_DAYS,
 )
 
 log = logging.getLogger(__name__)
 
-VERSION = "VDJ-RECOMBINATION-1.0"
+VERSION = "VDJ-RECOMBINATION-2.0"
 
-# ============================================================
-# CONSTANTS
-# ============================================================
-
-# Antibody population
-DEFAULT_POPULATION_SIZE = 100       # Initial antibody pool per generation
-ELITE_SURVIVORS = 10                # Top N survive clonal selection
-MEMORY_CELL_LIMIT = 50              # Max permanently stored antibodies
-
-# Clonal selection thresholds
-MIN_BACKTEST_BARS = 200             # Minimum bars for fitness evaluation
-MIN_TRADES_FOR_FITNESS = 10         # Must generate >= 10 trades to be scored
-MIN_WIN_RATE_SURVIVE = 0.55         # Below this = apoptosis
-MIN_PROFIT_FACTOR_SURVIVE = 1.2     # avg_win/avg_loss minimum
-
-# Affinity maturation
-MATURATION_ROUNDS = 5               # Number of hypermutation rounds per winner
-MATURATION_MUTATION_RATE = 0.20     # Probability of mutating each parameter
-MATURATION_PARAM_JITTER = 0.15      # Max fractional change per parameter
-
-# Junctional diversity (N-nucleotide additions)
-JUNCTIONAL_NOISE_SCALE = 0.10      # Random parameter offset at V-D and D-J junctions
-
-# Memory B cell thresholds
-MEMORY_MIN_WIN_RATE = 0.65          # Must exceed this to become a memory cell
-MEMORY_MIN_PROFIT_FACTOR = 1.5      # Must exceed this
-MEMORY_MIN_TRADES = 20              # Must have this many trades
-MEMORY_EXPIRY_DAYS = 90             # Re-evaluate after 90 days of inactivity
-
-# Bayesian prior for win rate estimation (same philosophy as domestication)
-PRIOR_ALPHA = 8
-PRIOR_BETA = 8
+# Junctional diversity
+JUNCTIONAL_BASE_SIGMA = 0.10
 
 
 # ============================================================
-# V SEGMENTS -- Entry Signal Generators
+# JUNCTIONAL DIVERSITY
 # ============================================================
 
-class VSegmentType(Enum):
-    """Each V segment corresponds to a specific entry signal logic."""
-    RSI_OVERSOLD     = "rsi_oversold"
-    RSI_OVERBOUGHT   = "rsi_overbought"
-    MACD_CROSS_UP    = "macd_cross_up"
-    MACD_CROSS_DOWN  = "macd_cross_down"
-    BB_LOWER_TOUCH   = "bb_lower_touch"
-    BB_UPPER_TOUCH   = "bb_upper_touch"
-    EMA_CROSS_UP     = "ema_cross_up"
-    EMA_CROSS_DOWN   = "ema_cross_down"
-    STOCH_OVERSOLD   = "stoch_oversold"
-    STOCH_OVERBOUGHT = "stoch_overbought"
-    MOMENTUM_LONG    = "momentum_long"
-    MOMENTUM_SHORT   = "momentum_short"
-    VOLUME_SPIKE_UP  = "volume_spike_up"
-    MEAN_REVERT_LONG = "mean_revert_long"
-    MEAN_REVERT_SHORT = "mean_revert_short"
-    BREAKOUT_HIGH    = "breakout_high"
-    BREAKOUT_LOW     = "breakout_low"
-    CANDLE_ENGULF_UP = "candle_engulf_up"
-    CANDLE_ENGULF_DN = "candle_engulf_dn"
-
-
-@dataclass
-class VSegment:
+def apply_junctional_diversity(
+    antibody: Dict,
+    junction_seed: int,
+    shock_level: float,
+    base_sigma: float = JUNCTIONAL_BASE_SIGMA,
+) -> Dict:
     """
-    Variable segment: entry signal generator with tunable parameters.
-    Maps to one or more TE families from the 33-family system.
+    Apply TdT-like random parameter perturbation at V-D and D-J junctions.
+    Turns ~2,400 valid V+D+J combos into ~240,000+ unique micro-strategies.
     """
-    segment_type: VSegmentType
-    # Tunable parameters (specific to each type)
-    params: Dict[str, float] = field(default_factory=dict)
-    # Which TE families this V segment draws from
-    te_sources: List[str] = field(default_factory=list)
+    rng = np.random.RandomState(junction_seed)
 
-    def default_params(self) -> Dict[str, float]:
-        """Default parameters for each V segment type."""
-        defaults = {
-            VSegmentType.RSI_OVERSOLD:     {"period": 14, "threshold": 30},
-            VSegmentType.RSI_OVERBOUGHT:   {"period": 14, "threshold": 70},
-            VSegmentType.MACD_CROSS_UP:    {"fast": 12, "slow": 26, "signal": 9},
-            VSegmentType.MACD_CROSS_DOWN:  {"fast": 12, "slow": 26, "signal": 9},
-            VSegmentType.BB_LOWER_TOUCH:   {"period": 20, "std_mult": 2.0},
-            VSegmentType.BB_UPPER_TOUCH:   {"period": 20, "std_mult": 2.0},
-            VSegmentType.EMA_CROSS_UP:     {"fast": 8, "slow": 21},
-            VSegmentType.EMA_CROSS_DOWN:   {"fast": 8, "slow": 21},
-            VSegmentType.STOCH_OVERSOLD:   {"k_period": 14, "d_period": 3, "threshold": 20},
-            VSegmentType.STOCH_OVERBOUGHT: {"k_period": 14, "d_period": 3, "threshold": 80},
-            VSegmentType.MOMENTUM_LONG:    {"lookback": 10, "threshold": 0.01},
-            VSegmentType.MOMENTUM_SHORT:   {"lookback": 10, "threshold": -0.01},
-            VSegmentType.VOLUME_SPIKE_UP:  {"lookback": 20, "spike_mult": 2.0},
-            VSegmentType.MEAN_REVERT_LONG: {"lookback": 20, "z_threshold": -2.0},
-            VSegmentType.MEAN_REVERT_SHORT:{"lookback": 20, "z_threshold": 2.0},
-            VSegmentType.BREAKOUT_HIGH:    {"lookback": 20, "buffer_pct": 0.001},
-            VSegmentType.BREAKOUT_LOW:     {"lookback": 20, "buffer_pct": 0.001},
-            VSegmentType.CANDLE_ENGULF_UP: {"min_body_ratio": 0.6},
-            VSegmentType.CANDLE_ENGULF_DN: {"min_body_ratio": 0.6},
-        }
-        return defaults.get(self.segment_type, {})
+    v_def = V_SEGMENTS[antibody["v_name"]]
+    d_def = D_SEGMENTS[antibody["d_name"]]
+    j_def = J_SEGMENTS[antibody["j_name"]]
 
-    def te_family_mapping(self) -> List[str]:
-        """Map V segments to source TE families from the 33-family system."""
-        mapping = {
-            VSegmentType.RSI_OVERSOLD:     ["Ty1_copia"],       # rsi
-            VSegmentType.RSI_OVERBOUGHT:   ["Ty1_copia"],
-            VSegmentType.MACD_CROSS_UP:    ["Ty3_gypsy"],       # macd
-            VSegmentType.MACD_CROSS_DOWN:  ["Ty3_gypsy"],
-            VSegmentType.BB_LOWER_TOUCH:   ["Ty5"],             # bollinger_position
-            VSegmentType.BB_UPPER_TOUCH:   ["Ty5"],
-            VSegmentType.EMA_CROSS_UP:     ["CACTA"],           # ema_crossover
-            VSegmentType.EMA_CROSS_DOWN:   ["CACTA"],
-            VSegmentType.STOCH_OVERSOLD:   ["BEL_Pao"],         # momentum proxy
-            VSegmentType.STOCH_OVERBOUGHT: ["BEL_Pao"],
-            VSegmentType.MOMENTUM_LONG:    ["BEL_Pao", "LINE"], # momentum + price_change
-            VSegmentType.MOMENTUM_SHORT:   ["BEL_Pao", "LINE"],
-            VSegmentType.VOLUME_SPIKE_UP:  ["SINE", "Helitron"],# tick_volume + volume_profile
-            VSegmentType.MEAN_REVERT_LONG: ["RTE"],             # mean_reversion
-            VSegmentType.MEAN_REVERT_SHORT:["RTE"],
-            VSegmentType.BREAKOUT_HIGH:    ["I_element", "SVA_Regulatory"],  # support_resistance + compression_breakout
-            VSegmentType.BREAKOUT_LOW:     ["I_element", "SVA_Regulatory"],
-            VSegmentType.CANDLE_ENGULF_UP: ["hobo"],            # candle_pattern
-            VSegmentType.CANDLE_ENGULF_DN: ["hobo"],
-        }
-        return mapping.get(self.segment_type, [])
+    # V-D Junction: perturb V entry lookback parameters
+    sigma_vd = base_sigma * (1 + shock_level * 0.5)
+    perturbed_v = {}
+    for lookback in v_def.get("lookback", []):
+        delta = int(rng.normal(0, sigma_vd * lookback))
+        perturbed_v[f"lookback_{lookback}"] = max(2, lookback + delta)
 
+    # Perturb D's param_shift factors
+    perturbed_d = {}
+    for key, val in d_def.get("param_shift", {}).items():
+        if isinstance(val, (int, float)):
+            delta = rng.normal(0, sigma_vd * abs(val))
+            perturbed_d[key] = max(0.01, val + delta)
 
-# ============================================================
-# D SEGMENTS -- Market Regime Classifiers
-# ============================================================
-
-class DSegmentType(Enum):
-    """Each D segment classifies the current market regime."""
-    TRENDING_UP   = "trending_up"
-    TRENDING_DOWN = "trending_down"
-    RANGING       = "ranging"
-    VOLATILE      = "volatile"
-    COMPRESSED    = "compressed"
-    BREAKOUT      = "breakout"
-    MEAN_REVERTING = "mean_reverting"
-
-
-@dataclass
-class DSegment:
-    """
-    Diversity segment: market regime classifier with tunable parameters.
-    Acts as a filter -- the antibody only fires when the regime matches.
-    """
-    segment_type: DSegmentType
-    params: Dict[str, float] = field(default_factory=dict)
-    te_sources: List[str] = field(default_factory=list)
-
-    def default_params(self) -> Dict[str, float]:
-        defaults = {
-            DSegmentType.TRENDING_UP:    {"adx_min": 25, "ema_diff_pct": 0.005},
-            DSegmentType.TRENDING_DOWN:  {"adx_min": 25, "ema_diff_pct": -0.005},
-            DSegmentType.RANGING:        {"adx_max": 20, "bb_width_max": 0.02},
-            DSegmentType.VOLATILE:       {"atr_ratio_min": 1.5},
-            DSegmentType.COMPRESSED:     {"atr_ratio_max": 0.6, "bb_squeeze": True},
-            DSegmentType.BREAKOUT:       {"compression_then_expansion": True, "lookback": 20},
-            DSegmentType.MEAN_REVERTING: {"hurst_max": 0.4},
-        }
-        return defaults.get(self.segment_type, {})
-
-    def te_family_mapping(self) -> List[str]:
-        mapping = {
-            DSegmentType.TRENDING_UP:    ["DIRS1", "Penelope"],       # trend_strength + trend_duration
-            DSegmentType.TRENDING_DOWN:  ["DIRS1", "Penelope"],
-            DSegmentType.RANGING:        ["Mariner_Tc1", "Mutator"],  # fractal_dim + mutation_rate
-            DSegmentType.VOLATILE:       ["VIPER_Ngaro", "Alu"],      # atr_ratio + short_volatility
-            DSegmentType.COMPRESSED:     ["Crypton", "SVA_Regulatory"],# compression_ratio + compression_breakout
-            DSegmentType.BREAKOUT:       ["SVA_Regulatory", "P_element"], # compression_breakout + spread_analysis
-            DSegmentType.MEAN_REVERTING: ["RTE", "Alu_Exonization"],  # mean_reversion + noise_pattern
-        }
-        return mapping.get(self.segment_type, [])
-
-
-# ============================================================
-# J SEGMENTS -- Exit Strategies
-# ============================================================
-
-class JSegmentType(Enum):
-    """Each J segment defines an exit strategy."""
-    FIXED_TP           = "fixed_tp"
-    TRAILING_STOP      = "trailing_stop"
-    PARTIAL_CLOSE      = "partial_close"
-    TIME_BASED         = "time_based"
-    SIGNAL_REVERSAL    = "signal_reversal"
-    ATR_TRAILING       = "atr_trailing"
-    BREAKEVEN_TRAIL    = "breakeven_trail"
-    OPPOSITE_BB        = "opposite_bb"
-
-
-@dataclass
-class JSegment:
-    """
-    Joining segment: exit strategy with tunable parameters.
-    Determines how and when profits are taken / losses are cut.
-    """
-    segment_type: JSegmentType
-    params: Dict[str, float] = field(default_factory=dict)
-    te_sources: List[str] = field(default_factory=list)
-
-    def default_params(self) -> Dict[str, float]:
-        defaults = {
-            JSegmentType.FIXED_TP:        {"tp_atr_mult": 3.0, "sl_atr_mult": 1.0},
-            JSegmentType.TRAILING_STOP:   {"trail_atr_mult": 1.5, "activation_atr": 1.0},
-            JSegmentType.PARTIAL_CLOSE:   {"partial_pct": 0.50, "partial_at_atr": 1.5, "remainder_trail": 2.0},
-            JSegmentType.TIME_BASED:      {"max_bars": 50, "min_profit_pct": 0.001},
-            JSegmentType.SIGNAL_REVERSAL: {"reversal_threshold": 0.6},
-            JSegmentType.ATR_TRAILING:    {"atr_period": 14, "atr_mult": 2.0},
-            JSegmentType.BREAKEVEN_TRAIL: {"be_trigger_atr": 1.0, "trail_after_be": 1.5},
-            JSegmentType.OPPOSITE_BB:     {"bb_period": 20, "bb_std": 2.0},
-        }
-        return defaults.get(self.segment_type, {})
-
-    def te_family_mapping(self) -> List[str]:
-        mapping = {
-            JSegmentType.FIXED_TP:        ["VIPER_Ngaro"],           # atr_ratio
-            JSegmentType.TRAILING_STOP:   ["VIPER_Ngaro", "LINE"],   # atr + price_change
-            JSegmentType.PARTIAL_CLOSE:   ["Arc_Capsid"],            # successful pattern echo
-            JSegmentType.TIME_BASED:      ["pogo"],                  # session_overlap
-            JSegmentType.SIGNAL_REVERSAL: ["L1_Neuronal"],           # pattern_repetition
-            JSegmentType.ATR_TRAILING:    ["VIPER_Ngaro"],
-            JSegmentType.BREAKEVEN_TRAIL: ["TRIM28_Silencer"],       # drawdown management
-            JSegmentType.OPPOSITE_BB:     ["Ty5"],                   # bollinger_position
-        }
-        return mapping.get(self.segment_type, [])
-
-
-# ============================================================
-# ANTIBODY -- A unique V+D+J combination
-# ============================================================
-
-@dataclass
-class Antibody:
-    """
-    A unique micro-strategy formed by V(D)J recombination.
-
-    The antibody encodes:
-      - WHAT signal triggers entry (V segment)
-      - WHEN that signal is valid (D segment = regime filter)
-      - HOW to exit the trade (J segment)
-      - Junctional noise at V-D and D-J boundaries
-
-    Each antibody can be evaluated against historical data for fitness.
-    """
-    antibody_id: str           # Unique hash
-    v_segment: VSegment        # Entry signal
-    d_segment: DSegment        # Regime filter
-    j_segment: JSegment        # Exit strategy
-
-    # Junctional diversity (random offsets at combination boundaries)
-    vd_junction_noise: Dict[str, float] = field(default_factory=dict)
-    dj_junction_noise: Dict[str, float] = field(default_factory=dict)
-
-    # Fitness metrics (populated after backtesting)
-    fitness: float = 0.0
-    win_rate: float = 0.0
-    profit_factor: float = 0.0
-    total_trades: int = 0
-    total_pnl: float = 0.0
-    sharpe_ratio: float = 0.0
-    max_drawdown: float = 0.0
-    avg_win: float = 0.0
-    avg_loss: float = 0.0
-
-    # Bayesian posterior win rate
-    posterior_wr: float = 0.5
-
-    # Lineage tracking
-    generation: int = 0
-    parent_id: Optional[str] = None
-    mutation_count: int = 0
-
-    # Memory cell status
-    is_memory_cell: bool = False
-    memory_since: Optional[str] = None
-
-    def compute_id(self) -> str:
-        """Generate unique hash from V+D+J combination + junction noise."""
-        raw = (
-            f"{self.v_segment.segment_type.value}"
-            f"|{json.dumps(self.v_segment.params, sort_keys=True)}"
-            f"|{self.d_segment.segment_type.value}"
-            f"|{json.dumps(self.d_segment.params, sort_keys=True)}"
-            f"|{self.j_segment.segment_type.value}"
-            f"|{json.dumps(self.j_segment.params, sort_keys=True)}"
-            f"|{json.dumps(self.vd_junction_noise, sort_keys=True)}"
-            f"|{json.dumps(self.dj_junction_noise, sort_keys=True)}"
-        )
-        return hashlib.md5(raw.encode()).hexdigest()[:16]
-
-    def get_direction(self) -> int:
-        """Infer trade direction from V segment type."""
-        long_types = {
-            VSegmentType.RSI_OVERSOLD, VSegmentType.MACD_CROSS_UP,
-            VSegmentType.BB_LOWER_TOUCH, VSegmentType.EMA_CROSS_UP,
-            VSegmentType.STOCH_OVERSOLD, VSegmentType.MOMENTUM_LONG,
-            VSegmentType.VOLUME_SPIKE_UP, VSegmentType.MEAN_REVERT_LONG,
-            VSegmentType.BREAKOUT_HIGH, VSegmentType.CANDLE_ENGULF_UP,
-        }
-        return 1 if self.v_segment.segment_type in long_types else -1
-
-    def get_te_fingerprint(self) -> List[str]:
-        """Get all TE families involved in this antibody."""
-        tes = set()
-        tes.update(self.v_segment.te_family_mapping())
-        tes.update(self.d_segment.te_family_mapping())
-        tes.update(self.j_segment.te_family_mapping())
-        return sorted(tes)
-
-    def summary(self) -> str:
-        d = self.get_direction()
-        dir_str = "LONG" if d > 0 else "SHORT"
-        return (
-            f"[{self.antibody_id[:8]}] {dir_str} | "
-            f"V={self.v_segment.segment_type.value} "
-            f"D={self.d_segment.segment_type.value} "
-            f"J={self.j_segment.segment_type.value} | "
-            f"WR={self.posterior_wr:.1%} PF={self.profit_factor:.2f} "
-            f"trades={self.total_trades} fit={self.fitness:.4f}"
-        )
-
-
-# ============================================================
-# VDJ RECOMBINATION ENGINE
-# ============================================================
-
-class VDJRecombinationEngine:
-    """
-    Core engine that performs V(D)J recombination to generate antibodies.
-
-    This is the RAG1/RAG2 recombinase equivalent. It:
-      1. Maintains pools of V, D, and J gene segments
-      2. Randomly combines one V + one D + one J to create an antibody
-      3. Adds junctional diversity (random parameter offsets at join points)
-      4. Evaluates antibody fitness via backtesting
-      5. Performs clonal selection (kill losers, clone winners)
-      6. Runs affinity maturation (somatic hypermutation on winners)
-      7. Stores the best as memory B cells in a persistent database
-    """
-
-    def __init__(
-        self,
-        db_path: str = None,
-        population_size: int = DEFAULT_POPULATION_SIZE,
-        seed: int = None,
-    ):
-        self.rng = random.Random(seed)
-        self.np_rng = np.random.RandomState(seed)
-        self.population_size = population_size
-
-        # Gene segment pools
-        self.v_pool: List[VSegmentType] = list(VSegmentType)
-        self.d_pool: List[DSegmentType] = list(DSegmentType)
-        self.j_pool: List[JSegmentType] = list(JSegmentType)
-
-        # Current antibody population
-        self.population: List[Antibody] = []
-
-        # Memory B cells (persisted winners)
-        self.memory_cells: List[Antibody] = []
-
-        # Database
-        if db_path is None:
-            self.db_path = str(Path(__file__).parent / "vdj_antibodies.db")
+    # D-J Junction: perturb J exit parameters
+    sigma_dj = base_sigma * (1 + shock_level * 0.3)
+    perturbed_j = {}
+    for key, val in j_def.get("params", {}).items():
+        if isinstance(val, (int, float)):
+            delta = rng.normal(0, sigma_dj * abs(val + 1e-10))
+            if isinstance(val, int):
+                perturbed_j[key] = max(1, int(val + delta))
+            else:
+                perturbed_j[key] = max(0.01, val + delta)
         else:
-            self.db_path = db_path
-        self._init_db()
+            perturbed_j[key] = val
 
-        # Load existing memory cells
-        self._load_memory_cells()
+    antibody["perturbed_v_params"] = perturbed_v
+    antibody["perturbed_d_params"] = perturbed_d
+    antibody["perturbed_j_params"] = perturbed_j
 
-        # Generation counter
-        self.generation = 0
+    return antibody
 
-        # TE activation engine for signal evaluation
-        self.te_engine = TEActivationEngine()
 
-    # ----------------------------------------------------------
-    # DATABASE
-    # ----------------------------------------------------------
+def _make_antibody_id(v_name: str, d_name: str, j_name: str, params: Dict) -> str:
+    """Generate unique hash for an antibody."""
+    raw = f"{v_name}|{d_name}|{j_name}|{json.dumps(params, sort_keys=True, default=str)}"
+    return hashlib.md5(raw.encode()).hexdigest()[:16]
 
-    def _init_db(self):
-        """Initialize the antibody database."""
-        try:
-            with sqlite3.connect(self.db_path, timeout=5) as conn:
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS antibodies (
-                        antibody_id TEXT PRIMARY KEY,
-                        v_type TEXT NOT NULL,
-                        v_params TEXT NOT NULL,
-                        d_type TEXT NOT NULL,
-                        d_params TEXT NOT NULL,
-                        j_type TEXT NOT NULL,
-                        j_params TEXT NOT NULL,
-                        vd_junction TEXT DEFAULT '{}',
-                        dj_junction TEXT DEFAULT '{}',
-                        fitness REAL DEFAULT 0.0,
-                        win_rate REAL DEFAULT 0.0,
-                        posterior_wr REAL DEFAULT 0.5,
-                        profit_factor REAL DEFAULT 0.0,
-                        total_trades INTEGER DEFAULT 0,
-                        total_pnl REAL DEFAULT 0.0,
-                        sharpe_ratio REAL DEFAULT 0.0,
-                        max_drawdown REAL DEFAULT 0.0,
-                        avg_win REAL DEFAULT 0.0,
-                        avg_loss REAL DEFAULT 0.0,
-                        generation INTEGER DEFAULT 0,
-                        parent_id TEXT,
-                        mutation_count INTEGER DEFAULT 0,
-                        is_memory_cell INTEGER DEFAULT 0,
-                        memory_since TEXT,
-                        te_fingerprint TEXT DEFAULT '',
-                        direction INTEGER DEFAULT 0,
-                        created_at TEXT,
-                        last_evaluated TEXT,
-                        last_activated TEXT
-                    )
-                """)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS vdj_generations (
-                        generation INTEGER PRIMARY KEY,
-                        timestamp TEXT,
-                        population_size INTEGER,
-                        survivors INTEGER,
-                        memory_cells_added INTEGER,
-                        avg_fitness REAL,
-                        best_fitness REAL,
-                        best_antibody_id TEXT,
-                        maturation_improvements INTEGER
-                    )
-                """)
-                conn.commit()
-        except Exception as e:
-            log.warning("VDJ DB init failed: %s", e)
 
-    def _load_memory_cells(self):
-        """Load memory B cells from database."""
-        try:
-            with sqlite3.connect(self.db_path, timeout=5) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT antibody_id, v_type, v_params, d_type, d_params,
-                           j_type, j_params, vd_junction, dj_junction,
-                           fitness, win_rate, posterior_wr, profit_factor,
-                           total_trades, total_pnl, sharpe_ratio, max_drawdown,
-                           avg_win, avg_loss, generation, parent_id,
-                           mutation_count, memory_since
-                    FROM antibodies
-                    WHERE is_memory_cell = 1
-                    ORDER BY fitness DESC
-                    LIMIT ?
-                """, (MEMORY_CELL_LIMIT,))
+# ============================================================
+# WALK-FORWARD BACKTESTING SIMULATOR
+# ============================================================
 
-                self.memory_cells = []
-                for row in cursor.fetchall():
-                    ab = self._row_to_antibody(row)
-                    ab.is_memory_cell = True
-                    self.memory_cells.append(ab)
+class WalkForwardSimulator:
+    """
+    Simulates antibody trading logic over historical data.
+    Uses the V segment for entry signals, D segment for regime filtering,
+    and J segment for exit management.
+    """
 
-                log.info("Loaded %d memory B cells from database", len(self.memory_cells))
-
-        except Exception as e:
-            log.warning("Failed to load memory cells: %s", e)
-
-    def _row_to_antibody(self, row) -> Antibody:
-        """Convert a database row to an Antibody object."""
-        v_seg = VSegment(
-            segment_type=VSegmentType(row[1]),
-            params=json.loads(row[2]),
-        )
-        v_seg.te_sources = v_seg.te_family_mapping()
-
-        d_seg = DSegment(
-            segment_type=DSegmentType(row[3]),
-            params=json.loads(row[4]),
-        )
-        d_seg.te_sources = d_seg.te_family_mapping()
-
-        j_seg = JSegment(
-            segment_type=JSegmentType(row[5]),
-            params=json.loads(row[6]),
-        )
-        j_seg.te_sources = j_seg.te_family_mapping()
-
-        return Antibody(
-            antibody_id=row[0],
-            v_segment=v_seg,
-            d_segment=d_seg,
-            j_segment=j_seg,
-            vd_junction_noise=json.loads(row[7]) if row[7] else {},
-            dj_junction_noise=json.loads(row[8]) if row[8] else {},
-            fitness=row[9] or 0.0,
-            win_rate=row[10] or 0.0,
-            posterior_wr=row[11] or 0.5,
-            profit_factor=row[12] or 0.0,
-            total_trades=row[13] or 0,
-            total_pnl=row[14] or 0.0,
-            sharpe_ratio=row[15] or 0.0,
-            max_drawdown=row[16] or 0.0,
-            avg_win=row[17] or 0.0,
-            avg_loss=row[18] or 0.0,
-            generation=row[19] or 0,
-            parent_id=row[20],
-            mutation_count=row[21] or 0,
-            memory_since=row[22],
-        )
-
-    def _save_antibody(self, ab: Antibody):
-        """Save a single antibody to the database."""
-        try:
-            with sqlite3.connect(self.db_path, timeout=5) as conn:
-                conn.execute("PRAGMA journal_mode=WAL")
-                now = datetime.now().isoformat()
-                conn.execute("""
-                    INSERT OR REPLACE INTO antibodies
-                    (antibody_id, v_type, v_params, d_type, d_params,
-                     j_type, j_params, vd_junction, dj_junction,
-                     fitness, win_rate, posterior_wr, profit_factor,
-                     total_trades, total_pnl, sharpe_ratio, max_drawdown,
-                     avg_win, avg_loss, generation, parent_id,
-                     mutation_count, is_memory_cell, memory_since,
-                     te_fingerprint, direction, created_at, last_evaluated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    ab.antibody_id,
-                    ab.v_segment.segment_type.value,
-                    json.dumps(ab.v_segment.params, sort_keys=True),
-                    ab.d_segment.segment_type.value,
-                    json.dumps(ab.d_segment.params, sort_keys=True),
-                    ab.j_segment.segment_type.value,
-                    json.dumps(ab.j_segment.params, sort_keys=True),
-                    json.dumps(ab.vd_junction_noise, sort_keys=True),
-                    json.dumps(ab.dj_junction_noise, sort_keys=True),
-                    ab.fitness, ab.win_rate, ab.posterior_wr, ab.profit_factor,
-                    ab.total_trades, ab.total_pnl, ab.sharpe_ratio,
-                    ab.max_drawdown, ab.avg_win, ab.avg_loss,
-                    ab.generation, ab.parent_id, ab.mutation_count,
-                    1 if ab.is_memory_cell else 0,
-                    ab.memory_since,
-                    "+".join(ab.get_te_fingerprint()),
-                    ab.get_direction(),
-                    now, now,
-                ))
-                conn.commit()
-        except Exception as e:
-            log.warning("Failed to save antibody %s: %s", ab.antibody_id, e)
-
-    def _save_generation(self, gen_stats: Dict):
-        """Save generation statistics."""
-        try:
-            with sqlite3.connect(self.db_path, timeout=5) as conn:
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("""
-                    INSERT OR REPLACE INTO vdj_generations
-                    (generation, timestamp, population_size, survivors,
-                     memory_cells_added, avg_fitness, best_fitness,
-                     best_antibody_id, maturation_improvements)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    gen_stats["generation"],
-                    gen_stats["timestamp"],
-                    gen_stats["population_size"],
-                    gen_stats["survivors"],
-                    gen_stats["memory_cells_added"],
-                    gen_stats["avg_fitness"],
-                    gen_stats["best_fitness"],
-                    gen_stats["best_antibody_id"],
-                    gen_stats["maturation_improvements"],
-                ))
-                conn.commit()
-        except Exception as e:
-            log.warning("Failed to save generation stats: %s", e)
-
-    # ----------------------------------------------------------
-    # STEP 1: V(D)J RECOMBINATION -- Generate Antibodies
-    # ----------------------------------------------------------
-
-    def recombine(self, n: int = None) -> List[Antibody]:
+    @staticmethod
+    def simulate(antibody: Dict, bars: np.ndarray, spread_points: float = 2.0) -> Dict:
         """
-        Generate a pool of antibodies through V(D)J recombination.
+        Run a single antibody through walk-forward simulation.
 
-        This is the RAG1/RAG2 cut-and-paste reaction:
-          1. Randomly select one V, one D, one J segment
-          2. Initialize with default parameters
-          3. Add junctional diversity (N-nucleotide additions)
-          4. Compute unique antibody ID
-
-        Returns list of newly created antibodies.
+        Returns dict with: n_trades, n_wins, total_profit, total_loss,
+                           trade_returns, max_drawdown
         """
-        n = n or self.population_size
-        self.generation += 1
-        antibodies = []
-
-        for _ in range(n):
-            # RAG1/RAG2 selects one segment from each pool
-            v_type = self.rng.choice(self.v_pool)
-            d_type = self.rng.choice(self.d_pool)
-            j_type = self.rng.choice(self.j_pool)
-
-            # Create segments with default parameters
-            v_seg = VSegment(segment_type=v_type)
-            v_seg.params = v_seg.default_params()
-            v_seg.te_sources = v_seg.te_family_mapping()
-
-            d_seg = DSegment(segment_type=d_type)
-            d_seg.params = d_seg.default_params()
-            d_seg.te_sources = d_seg.te_family_mapping()
-
-            j_seg = JSegment(segment_type=j_type)
-            j_seg.params = j_seg.default_params()
-            j_seg.te_sources = j_seg.te_family_mapping()
-
-            # Junctional diversity: random offsets at V-D boundary
-            # (Like N-nucleotide additions by TdT enzyme)
-            vd_noise = {}
-            for key in v_seg.params:
-                if isinstance(v_seg.params[key], (int, float)):
-                    noise = self.rng.gauss(0, JUNCTIONAL_NOISE_SCALE)
-                    vd_noise[f"v_{key}"] = noise
-                    v_seg.params[key] *= (1.0 + noise)
-
-            # Junctional diversity at D-J boundary
-            dj_noise = {}
-            for key in j_seg.params:
-                if isinstance(j_seg.params[key], (int, float)):
-                    noise = self.rng.gauss(0, JUNCTIONAL_NOISE_SCALE)
-                    dj_noise[f"j_{key}"] = noise
-                    j_seg.params[key] *= (1.0 + noise)
-
-            # Also jitter D segment params
-            for key in d_seg.params:
-                if isinstance(d_seg.params[key], (int, float)):
-                    noise = self.rng.gauss(0, JUNCTIONAL_NOISE_SCALE * 0.5)
-                    d_seg.params[key] *= (1.0 + noise)
-
-            ab = Antibody(
-                antibody_id="",  # Will compute
-                v_segment=v_seg,
-                d_segment=d_seg,
-                j_segment=j_seg,
-                vd_junction_noise=vd_noise,
-                dj_junction_noise=dj_noise,
-                generation=self.generation,
-            )
-            ab.antibody_id = ab.compute_id()
-            antibodies.append(ab)
-
-        self.population = antibodies
-        log.info(
-            "[VDJ] Generation %d: recombined %d antibodies from %dV x %dD x %dJ segments",
-            self.generation, n,
-            len(self.v_pool), len(self.d_pool), len(self.j_pool),
-        )
-        return antibodies
-
-    # ----------------------------------------------------------
-    # STEP 2: FITNESS EVALUATION (Antigen Testing)
-    # ----------------------------------------------------------
-
-    def evaluate_fitness(
-        self,
-        bars: np.ndarray,
-        antibodies: List[Antibody] = None,
-        spread_points: float = 2.0,
-    ) -> List[Antibody]:
-        """
-        Evaluate each antibody's fitness by backtesting against price data.
-
-        This is the "antigen presentation" step: each antibody is tested
-        against the market (the pathogen) to see if it can produce a
-        profitable immune response (trading edge).
-
-        Args:
-            bars: OHLCV numpy array (N x 5), minimum 200 rows
-            antibodies: list to evaluate (defaults to self.population)
-            spread_points: trading cost in price points per round trip
-
-        Returns:
-            Same antibodies list with fitness metrics populated.
-        """
-        if antibodies is None:
-            antibodies = self.population
-
-        if len(bars) < MIN_BACKTEST_BARS:
-            log.warning("Need >= %d bars for fitness eval, got %d", MIN_BACKTEST_BARS, len(bars))
-            return antibodies
+        if len(bars) < 100:
+            return {"n_trades": 0, "n_wins": 0, "total_profit": 0, "total_loss": 0,
+                    "trade_returns": [], "max_drawdown": 0}
 
         close = bars[:, 3]
         high = bars[:, 1]
@@ -764,50 +160,32 @@ class VDJRecombinationEngine:
         open_p = bars[:, 0]
         volume = bars[:, 4] if bars.shape[1] > 4 else np.ones(len(close))
 
-        for ab in antibodies:
-            trades = self._simulate_antibody(ab, open_p, high, low, close, volume, spread_points)
-            self._compute_fitness_metrics(ab, trades)
+        v_def = V_SEGMENTS[antibody["v_name"]]
+        j_def = J_SEGMENTS[antibody["j_name"]]
+        j_params = antibody.get("perturbed_j_params", j_def.get("params", {}))
 
-        # Sort by fitness
-        antibodies.sort(key=lambda a: a.fitness, reverse=True)
+        direction_map = {
+            "trend-following": 1,
+            "mean-reverting": -1,
+            "neutral": 0,
+            "adaptive": 0,
+            "risk-off": 0,
+        }
+        base_dir = direction_map.get(v_def.get("direction", "neutral"), 0)
 
-        log.info(
-            "[VDJ] Evaluated %d antibodies | Best: %s (fit=%.4f) | Worst: %s (fit=%.4f)",
-            len(antibodies),
-            antibodies[0].antibody_id[:8] if antibodies else "N/A",
-            antibodies[0].fitness if antibodies else 0,
-            antibodies[-1].antibody_id[:8] if antibodies else "N/A",
-            antibodies[-1].fitness if antibodies else 0,
-        )
-        return antibodies
+        atr_arr = WalkForwardSimulator._compute_atr(high, low, close, 14)
 
-    def _simulate_antibody(
-        self,
-        ab: Antibody,
-        open_p: np.ndarray,
-        high: np.ndarray,
-        low: np.ndarray,
-        close: np.ndarray,
-        volume: np.ndarray,
-        spread: float,
-    ) -> List[Dict]:
-        """
-        Simulate an antibody's trading logic over historical data.
-        Returns list of trade results: [{entry_bar, exit_bar, direction, pnl}, ...]
-        """
         trades = []
         in_trade = False
         entry_price = 0.0
         entry_bar = 0
-        direction = ab.get_direction()
+        direction = 0
+        sl_dist = 0.0
+        tp_dist = 0.0
         trail_stop = 0.0
-        partial_closed = False
 
-        # ATR for position sizing reference
-        atr_arr = self._compute_atr(high, low, close, 14)
-
-        # Need enough lookback for indicators
-        start_bar = max(50, int(ab.v_segment.params.get("period", 14)) + 5)
+        max_lookback = max(v_def.get("lookback", [14])) if v_def.get("lookback") else 14
+        start_bar = max(55, max_lookback + 5)
 
         for i in range(start_bar, len(close)):
             atr = atr_arr[i] if i < len(atr_arr) else atr_arr[-1]
@@ -815,838 +193,326 @@ class VDJRecombinationEngine:
                 continue
 
             if not in_trade:
-                # Check D segment (regime filter)
-                if not self._check_regime(ab.d_segment, open_p, high, low, close, volume, i):
+                # Regime check (simplified: use D segment detection hints)
+                if not WalkForwardSimulator._check_regime(antibody, close, high, low, volume, i):
                     continue
 
-                # Check V segment (entry signal)
-                if self._check_entry(ab.v_segment, open_p, high, low, close, volume, i):
+                # Entry check
+                entry_signal = WalkForwardSimulator._check_entry(antibody, close, high, low, open_p, volume, i)
+                if entry_signal != 0:
+                    direction = entry_signal if base_dir == 0 else base_dir
                     entry_price = close[i]
                     entry_bar = i
                     in_trade = True
-                    partial_closed = False
 
-                    # Initialize exit parameters from J segment
-                    j_params = ab.j_segment.params
-                    if ab.j_segment.segment_type == JSegmentType.FIXED_TP:
-                        tp_dist = atr * j_params.get("tp_atr_mult", 3.0)
-                        sl_dist = atr * j_params.get("sl_atr_mult", 1.0)
-                    elif ab.j_segment.segment_type == JSegmentType.TRAILING_STOP:
-                        trail_stop = entry_price - direction * atr * j_params.get("trail_atr_mult", 1.5)
-                        tp_dist = atr * 5.0  # Wide TP, let trail do the work
-                        sl_dist = atr * j_params.get("trail_atr_mult", 1.5)
-                    elif ab.j_segment.segment_type == JSegmentType.ATR_TRAILING:
-                        trail_stop = entry_price - direction * atr * j_params.get("atr_mult", 2.0)
-                        tp_dist = atr * 6.0
-                        sl_dist = atr * j_params.get("atr_mult", 2.0)
-                    else:
-                        tp_dist = atr * 3.0
+                    # Set exit levels from J segment
+                    exit_type = j_def.get("exit_type", "FIXED_TARGET")
+                    if exit_type == "TRAILING_STOP":
+                        mult = j_params.get("atr_multiplier", 2.0)
+                        sl_dist = atr * mult
+                        tp_dist = atr * 8.0
+                        trail_stop = entry_price - direction * sl_dist
+                    elif exit_type == "FIXED_TARGET":
+                        rr = j_params.get("rr_ratio", 2.0)
                         sl_dist = atr * 1.5
+                        tp_dist = sl_dist * rr
+                    elif exit_type == "DYNAMIC":
+                        sl_dist = atr * 1.5
+                        tp_rr = j_params.get("tp1_rr", 1.5)
+                        tp_dist = sl_dist * tp_rr
+                    elif exit_type == "TIME_BASED":
+                        sl_dist = atr * 2.0
+                        tp_dist = atr * 6.0
+                    else:
+                        sl_dist = atr * 1.5
+                        tp_dist = atr * 3.0
 
             else:
-                # In trade: check exit conditions
                 bars_held = i - entry_bar
                 current_pnl = (close[i] - entry_price) * direction
 
-                # Update trailing stop if applicable
-                if ab.j_segment.segment_type in (JSegmentType.TRAILING_STOP, JSegmentType.ATR_TRAILING):
+                # Update trailing stop
+                if j_def.get("exit_type") == "TRAILING_STOP":
+                    mult = j_params.get("atr_multiplier", 2.0)
                     if direction > 0:
-                        new_trail = close[i] - atr * ab.j_segment.params.get("trail_atr_mult",
-                                                     ab.j_segment.params.get("atr_mult", 1.5))
-                        trail_stop = max(trail_stop, new_trail)
+                        trail_stop = max(trail_stop, close[i] - atr * mult)
                     else:
-                        new_trail = close[i] + atr * ab.j_segment.params.get("trail_atr_mult",
-                                                     ab.j_segment.params.get("atr_mult", 1.5))
-                        trail_stop = min(trail_stop, new_trail)
+                        trail_stop = min(trail_stop, close[i] + atr * mult)
 
-                # Check exit conditions
                 exited = False
                 exit_pnl = 0.0
 
-                # Stop loss hit
+                # SL hit
                 if current_pnl <= -sl_dist:
-                    exit_pnl = -sl_dist - spread
+                    exit_pnl = -sl_dist - spread_points
                     exited = True
-
-                # Take profit hit
+                # TP hit
                 elif current_pnl >= tp_dist:
-                    exit_pnl = tp_dist - spread
+                    exit_pnl = tp_dist - spread_points
                     exited = True
-
-                # Trailing stop hit
-                elif ab.j_segment.segment_type in (JSegmentType.TRAILING_STOP, JSegmentType.ATR_TRAILING):
+                # Trail hit
+                elif j_def.get("exit_type") == "TRAILING_STOP":
                     if direction > 0 and close[i] <= trail_stop:
-                        exit_pnl = (trail_stop - entry_price) * direction - spread
+                        exit_pnl = (trail_stop - entry_price) - spread_points
                         exited = True
                     elif direction < 0 and close[i] >= trail_stop:
-                        exit_pnl = (entry_price - trail_stop) * abs(direction) - spread
+                        exit_pnl = (entry_price - trail_stop) - spread_points
                         exited = True
-
-                # Time-based exit
-                elif ab.j_segment.segment_type == JSegmentType.TIME_BASED:
-                    max_bars = int(ab.j_segment.params.get("max_bars", 50))
+                # Time exit
+                elif j_def.get("exit_type") == "TIME_BASED":
+                    max_bars = j_params.get("max_bars", 60)
                     if bars_held >= max_bars:
-                        exit_pnl = current_pnl - spread
+                        exit_pnl = current_pnl - spread_points
                         exited = True
-
-                # Partial close logic
-                if (not exited and not partial_closed
-                        and ab.j_segment.segment_type == JSegmentType.PARTIAL_CLOSE):
-                    partial_at = atr * ab.j_segment.params.get("partial_at_atr", 1.5)
-                    if current_pnl >= partial_at:
-                        # Record partial profit
-                        partial_pct = ab.j_segment.params.get("partial_pct", 0.5)
-                        partial_profit = current_pnl * partial_pct - spread * 0.5
-                        trades.append({
-                            "entry_bar": entry_bar,
-                            "exit_bar": i,
-                            "direction": direction,
-                            "pnl": partial_profit,
-                            "partial": True,
-                        })
-                        partial_closed = True
-                        # Move SL to breakeven for remainder
-                        sl_dist = 0.0
+                # Emergency time limit
+                elif bars_held > 500:
+                    exit_pnl = current_pnl - spread_points
+                    exited = True
 
                 if exited:
-                    # Adjust if partial was already taken
-                    if partial_closed:
-                        remaining_pct = 1.0 - ab.j_segment.params.get("partial_pct", 0.5)
-                        exit_pnl *= remaining_pct
-
-                    trades.append({
-                        "entry_bar": entry_bar,
-                        "exit_bar": i,
-                        "direction": direction,
-                        "pnl": exit_pnl,
-                        "partial": False,
-                    })
+                    trades.append(exit_pnl)
                     in_trade = False
 
-        return trades
-
-    def _check_entry(
-        self, v: VSegment, open_p, high, low, close, volume, i: int
-    ) -> bool:
-        """Check if V segment entry condition is met at bar i."""
-        p = v.params
-        vt = v.segment_type
-
-        if vt == VSegmentType.RSI_OVERSOLD:
-            rsi = self._rsi(close[:i+1], int(p.get("period", 14)))
-            return rsi < p.get("threshold", 30)
-
-        elif vt == VSegmentType.RSI_OVERBOUGHT:
-            rsi = self._rsi(close[:i+1], int(p.get("period", 14)))
-            return rsi > p.get("threshold", 70)
-
-        elif vt == VSegmentType.MACD_CROSS_UP:
-            fast = int(p.get("fast", 12))
-            slow = int(p.get("slow", 26))
-            if i < slow + 2:
-                return False
-            ema_fast_now = self._ema_val(close[:i+1], fast)
-            ema_slow_now = self._ema_val(close[:i+1], slow)
-            ema_fast_prev = self._ema_val(close[:i], fast)
-            ema_slow_prev = self._ema_val(close[:i], slow)
-            return (ema_fast_now - ema_slow_now) > 0 and (ema_fast_prev - ema_slow_prev) <= 0
-
-        elif vt == VSegmentType.MACD_CROSS_DOWN:
-            fast = int(p.get("fast", 12))
-            slow = int(p.get("slow", 26))
-            if i < slow + 2:
-                return False
-            ema_fast_now = self._ema_val(close[:i+1], fast)
-            ema_slow_now = self._ema_val(close[:i+1], slow)
-            ema_fast_prev = self._ema_val(close[:i], fast)
-            ema_slow_prev = self._ema_val(close[:i], slow)
-            return (ema_fast_now - ema_slow_now) < 0 and (ema_fast_prev - ema_slow_prev) >= 0
-
-        elif vt == VSegmentType.BB_LOWER_TOUCH:
-            period = int(p.get("period", 20))
-            std_mult = p.get("std_mult", 2.0)
-            if i < period:
-                return False
-            sma = np.mean(close[i-period+1:i+1])
-            std = np.std(close[i-period+1:i+1])
-            lower_band = sma - std_mult * std
-            return close[i] <= lower_band
-
-        elif vt == VSegmentType.BB_UPPER_TOUCH:
-            period = int(p.get("period", 20))
-            std_mult = p.get("std_mult", 2.0)
-            if i < period:
-                return False
-            sma = np.mean(close[i-period+1:i+1])
-            std = np.std(close[i-period+1:i+1])
-            upper_band = sma + std_mult * std
-            return close[i] >= upper_band
-
-        elif vt == VSegmentType.EMA_CROSS_UP:
-            fast = int(p.get("fast", 8))
-            slow = int(p.get("slow", 21))
-            if i < slow + 2:
-                return False
-            f_now = self._ema_val(close[:i+1], fast)
-            s_now = self._ema_val(close[:i+1], slow)
-            f_prev = self._ema_val(close[:i], fast)
-            s_prev = self._ema_val(close[:i], slow)
-            return f_now > s_now and f_prev <= s_prev
-
-        elif vt == VSegmentType.EMA_CROSS_DOWN:
-            fast = int(p.get("fast", 8))
-            slow = int(p.get("slow", 21))
-            if i < slow + 2:
-                return False
-            f_now = self._ema_val(close[:i+1], fast)
-            s_now = self._ema_val(close[:i+1], slow)
-            f_prev = self._ema_val(close[:i], fast)
-            s_prev = self._ema_val(close[:i], slow)
-            return f_now < s_now and f_prev >= s_prev
-
-        elif vt == VSegmentType.STOCH_OVERSOLD:
-            k_period = int(p.get("k_period", 14))
-            threshold = p.get("threshold", 20)
-            if i < k_period:
-                return False
-            highest = np.max(high[i-k_period+1:i+1])
-            lowest = np.min(low[i-k_period+1:i+1])
-            if highest == lowest:
-                return False
-            k_val = 100 * (close[i] - lowest) / (highest - lowest)
-            return k_val < threshold
-
-        elif vt == VSegmentType.STOCH_OVERBOUGHT:
-            k_period = int(p.get("k_period", 14))
-            threshold = p.get("threshold", 80)
-            if i < k_period:
-                return False
-            highest = np.max(high[i-k_period+1:i+1])
-            lowest = np.min(low[i-k_period+1:i+1])
-            if highest == lowest:
-                return False
-            k_val = 100 * (close[i] - lowest) / (highest - lowest)
-            return k_val > threshold
-
-        elif vt == VSegmentType.MOMENTUM_LONG:
-            lb = int(p.get("lookback", 10))
-            threshold = p.get("threshold", 0.01)
-            if i < lb:
-                return False
-            ret = (close[i] - close[i-lb]) / (close[i-lb] + 1e-10)
-            return ret > threshold
-
-        elif vt == VSegmentType.MOMENTUM_SHORT:
-            lb = int(p.get("lookback", 10))
-            threshold = p.get("threshold", -0.01)
-            if i < lb:
-                return False
-            ret = (close[i] - close[i-lb]) / (close[i-lb] + 1e-10)
-            return ret < threshold
-
-        elif vt == VSegmentType.VOLUME_SPIKE_UP:
-            lb = int(p.get("lookback", 20))
-            spike_mult = p.get("spike_mult", 2.0)
-            if i < lb:
-                return False
-            avg_vol = np.mean(volume[i-lb:i])
-            return volume[i] > avg_vol * spike_mult and close[i] > open_p[i]
-
-        elif vt == VSegmentType.MEAN_REVERT_LONG:
-            lb = int(p.get("lookback", 20))
-            z_thresh = p.get("z_threshold", -2.0)
-            if i < lb:
-                return False
-            sma = np.mean(close[i-lb+1:i+1])
-            std = np.std(close[i-lb+1:i+1])
-            if std < 1e-10:
-                return False
-            z = (close[i] - sma) / std
-            return z < z_thresh
-
-        elif vt == VSegmentType.MEAN_REVERT_SHORT:
-            lb = int(p.get("lookback", 20))
-            z_thresh = p.get("z_threshold", 2.0)
-            if i < lb:
-                return False
-            sma = np.mean(close[i-lb+1:i+1])
-            std = np.std(close[i-lb+1:i+1])
-            if std < 1e-10:
-                return False
-            z = (close[i] - sma) / std
-            return z > z_thresh
-
-        elif vt == VSegmentType.BREAKOUT_HIGH:
-            lb = int(p.get("lookback", 20))
-            buffer = p.get("buffer_pct", 0.001)
-            if i < lb + 1:
-                return False
-            prev_high = np.max(high[i-lb:i])
-            return close[i] > prev_high * (1 + buffer)
-
-        elif vt == VSegmentType.BREAKOUT_LOW:
-            lb = int(p.get("lookback", 20))
-            buffer = p.get("buffer_pct", 0.001)
-            if i < lb + 1:
-                return False
-            prev_low = np.min(low[i-lb:i])
-            return close[i] < prev_low * (1 - buffer)
-
-        elif vt == VSegmentType.CANDLE_ENGULF_UP:
-            min_ratio = p.get("min_body_ratio", 0.6)
-            if i < 2:
-                return False
-            prev_body = open_p[i-1] - close[i-1]  # Negative if prev was bearish
-            curr_body = close[i] - open_p[i]       # Positive if current is bullish
-            curr_range = high[i] - low[i]
-            if curr_range < 1e-10:
-                return False
-            body_ratio = abs(curr_body) / curr_range
-            return prev_body < 0 and curr_body > 0 and curr_body > abs(prev_body) and body_ratio > min_ratio
-
-        elif vt == VSegmentType.CANDLE_ENGULF_DN:
-            min_ratio = p.get("min_body_ratio", 0.6)
-            if i < 2:
-                return False
-            prev_body = close[i-1] - open_p[i-1]
-            curr_body = open_p[i] - close[i]
-            curr_range = high[i] - low[i]
-            if curr_range < 1e-10:
-                return False
-            body_ratio = abs(curr_body) / curr_range
-            return prev_body > 0 and curr_body > 0 and curr_body > abs(prev_body) and body_ratio > min_ratio
-
-        return False
-
-    def _check_regime(
-        self, d: DSegment, open_p, high, low, close, volume, i: int
-    ) -> bool:
-        """Check if D segment regime condition is met at bar i."""
-        p = d.params
-        dt = d.segment_type
-
-        if dt == DSegmentType.TRENDING_UP:
-            if i < 30:
-                return False
-            ema_diff_pct = p.get("ema_diff_pct", 0.005)
-            ema8 = self._ema_val(close[:i+1], 8)
-            ema21 = self._ema_val(close[:i+1], 21)
-            diff = (ema8 - ema21) / (ema21 + 1e-10)
-            return diff > ema_diff_pct
-
-        elif dt == DSegmentType.TRENDING_DOWN:
-            if i < 30:
-                return False
-            ema_diff_pct = p.get("ema_diff_pct", -0.005)
-            ema8 = self._ema_val(close[:i+1], 8)
-            ema21 = self._ema_val(close[:i+1], 21)
-            diff = (ema8 - ema21) / (ema21 + 1e-10)
-            return diff < ema_diff_pct
-
-        elif dt == DSegmentType.RANGING:
-            if i < 30:
-                return False
-            bb_width_max = p.get("bb_width_max", 0.02)
-            sma = np.mean(close[i-19:i+1])
-            std = np.std(close[i-19:i+1])
-            bb_width = (2 * std) / (sma + 1e-10)
-            return bb_width < bb_width_max
-
-        elif dt == DSegmentType.VOLATILE:
-            if i < 30:
-                return False
-            atr_ratio_min = p.get("atr_ratio_min", 1.5)
-            atr_recent = self._atr_val(high[i-4:i+1], low[i-4:i+1], close[i-4:i+1])
-            atr_baseline = self._atr_val(high[i-24:i-4], low[i-24:i-4], close[i-24:i-4])
-            if atr_baseline < 1e-10:
-                return False
-            return atr_recent / atr_baseline > atr_ratio_min
-
-        elif dt == DSegmentType.COMPRESSED:
-            if i < 30:
-                return False
-            atr_ratio_max = p.get("atr_ratio_max", 0.6)
-            atr_recent = self._atr_val(high[i-4:i+1], low[i-4:i+1], close[i-4:i+1])
-            atr_baseline = self._atr_val(high[i-24:i-4], low[i-24:i-4], close[i-24:i-4])
-            if atr_baseline < 1e-10:
-                return False
-            return atr_recent / atr_baseline < atr_ratio_max
-
-        elif dt == DSegmentType.BREAKOUT:
-            if i < 30:
-                return False
-            # Compression followed by expansion
-            atr_5 = self._atr_val(high[i-4:i+1], low[i-4:i+1], close[i-4:i+1])
-            atr_prev_5 = self._atr_val(high[i-9:i-4], low[i-9:i-4], close[i-9:i-4])
-            atr_20 = self._atr_val(high[i-19:i+1], low[i-19:i+1], close[i-19:i+1])
-            if atr_20 < 1e-10 or atr_prev_5 < 1e-10:
-                return False
-            was_compressed = atr_prev_5 / atr_20 < 0.7
-            now_expanding = atr_5 / atr_prev_5 > 1.5
-            return was_compressed and now_expanding
-
-        elif dt == DSegmentType.MEAN_REVERTING:
-            if i < 30:
-                return False
-            # Approximate Hurst exponent via R/S analysis
-            returns = np.diff(close[i-29:i+1]) / (close[i-29:i] + 1e-10)
-            if len(returns) < 10:
-                return False
-            mean_r = np.mean(returns)
-            deviations = np.cumsum(returns - mean_r)
-            r = np.max(deviations) - np.min(deviations)
-            s = np.std(returns)
-            if s < 1e-10:
-                return False
-            hurst_approx = np.log(r / s + 1e-10) / np.log(len(returns))
-            return hurst_approx < p.get("hurst_max", 0.4)
-
-        # Default: regime check passes (permissive)
-        return True
-
-    def _compute_fitness_metrics(self, ab: Antibody, trades: List[Dict]):
-        """Compute fitness metrics from trade results."""
-        if not trades:
-            ab.fitness = 0.0
-            ab.win_rate = 0.0
-            ab.profit_factor = 0.0
-            ab.total_trades = 0
-            ab.total_pnl = 0.0
-            ab.posterior_wr = (PRIOR_ALPHA) / (PRIOR_ALPHA + PRIOR_BETA)
-            return
-
-        pnls = [t["pnl"] for t in trades]
-        wins = [p for p in pnls if p > 0]
-        losses = [p for p in pnls if p <= 0]
-
-        ab.total_trades = len(trades)
-        ab.total_pnl = sum(pnls)
-        ab.win_rate = len(wins) / len(trades) if trades else 0
-        ab.avg_win = np.mean(wins) if wins else 0.0
-        ab.avg_loss = abs(np.mean(losses)) if losses else 0.0
-        ab.profit_factor = ab.avg_win / ab.avg_loss if ab.avg_loss > 0 else (99.0 if ab.avg_win > 0 else 0.0)
-
-        # Bayesian posterior win rate
-        ab.posterior_wr = (PRIOR_ALPHA + len(wins)) / (PRIOR_ALPHA + PRIOR_BETA + len(trades))
-
-        # Sharpe ratio (annualized, assuming daily bars)
-        if len(pnls) > 1:
-            mean_pnl = np.mean(pnls)
-            std_pnl = np.std(pnls)
-            ab.sharpe_ratio = (mean_pnl / std_pnl) * np.sqrt(252) if std_pnl > 0 else 0.0
-        else:
-            ab.sharpe_ratio = 0.0
+        # Compute result metrics
+        n_trades = len(trades)
+        n_wins = sum(1 for t in trades if t > 0)
+        total_profit = sum(t for t in trades if t > 0)
+        total_loss = sum(t for t in trades if t <= 0)
 
         # Max drawdown
-        cum_pnl = np.cumsum(pnls)
-        peak = np.maximum.accumulate(cum_pnl)
-        drawdown = peak - cum_pnl
-        ab.max_drawdown = float(np.max(drawdown)) if len(drawdown) > 0 else 0.0
-
-        # Composite fitness function
-        # Weighted: posterior_wr * 0.30 + profit_factor * 0.25 + sharpe * 0.25 + trade_count * 0.10 + low_dd * 0.10
-        wr_score = ab.posterior_wr
-        pf_score = min(1.0, ab.profit_factor / 3.0) if ab.profit_factor > 0 else 0.0
-        sharpe_score = min(1.0, max(0.0, ab.sharpe_ratio / 3.0))
-        trade_score = min(1.0, ab.total_trades / 50.0)
-        dd_score = max(0.0, 1.0 - ab.max_drawdown / (abs(ab.total_pnl) + 1e-10))
-
-        ab.fitness = (
-            wr_score * 0.30
-            + pf_score * 0.25
-            + sharpe_score * 0.25
-            + trade_score * 0.10
-            + dd_score * 0.10
-        )
-
-    # ----------------------------------------------------------
-    # STEP 3: CLONAL SELECTION (Kill Losers, Clone Winners)
-    # ----------------------------------------------------------
-
-    def clonal_selection(
-        self,
-        antibodies: List[Antibody] = None,
-        n_survivors: int = ELITE_SURVIVORS,
-    ) -> Tuple[List[Antibody], List[Antibody]]:
-        """
-        Clonal selection: test all antibodies, kill the losers, keep the winners.
-
-        Selection criteria (must meet ALL to survive):
-          1. Minimum number of trades (proves it actually fires)
-          2. Posterior win rate above threshold
-          3. Profit factor above threshold
-
-        Antibodies that fail undergo apoptosis (programmed cell death).
-
-        Returns:
-            (survivors, dead) -- lists of surviving and dead antibodies
-        """
-        if antibodies is None:
-            antibodies = self.population
-
-        survivors = []
-        dead = []
-
-        for ab in antibodies:
-            if (ab.total_trades >= MIN_TRADES_FOR_FITNESS
-                    and ab.posterior_wr >= MIN_WIN_RATE_SURVIVE
-                    and ab.profit_factor >= MIN_PROFIT_FACTOR_SURVIVE):
-                survivors.append(ab)
-            else:
-                dead.append(ab)
-
-        # Sort survivors by fitness and keep top N
-        survivors.sort(key=lambda a: a.fitness, reverse=True)
-        if len(survivors) > n_survivors:
-            dead.extend(survivors[n_survivors:])
-            survivors = survivors[:n_survivors]
-
-        log.info(
-            "[VDJ] Clonal selection: %d survived / %d died (%.1f%% survival rate)",
-            len(survivors), len(dead),
-            100 * len(survivors) / max(1, len(survivors) + len(dead)),
-        )
-
-        if survivors:
-            log.info(
-                "[VDJ] Best survivor: %s | WR=%.1f%% PF=%.2f trades=%d",
-                survivors[0].antibody_id[:8],
-                survivors[0].posterior_wr * 100,
-                survivors[0].profit_factor,
-                survivors[0].total_trades,
-            )
-
-        return survivors, dead
-
-    # ----------------------------------------------------------
-    # STEP 4: AFFINITY MATURATION (Somatic Hypermutation)
-    # ----------------------------------------------------------
-
-    def affinity_maturation(
-        self,
-        survivors: List[Antibody],
-        bars: np.ndarray,
-        rounds: int = MATURATION_ROUNDS,
-        spread_points: float = 2.0,
-    ) -> List[Antibody]:
-        """
-        Affinity maturation: mutate parameters of winning antibodies to
-        find even better versions. This mimics somatic hypermutation in
-        germinal centers.
-
-        For each survivor:
-          1. Create N mutant copies with small parameter changes
-          2. Evaluate all mutants
-          3. If a mutant is better than the parent, it replaces the parent
-          4. Repeat for multiple rounds (affinity maturation cycles)
-
-        Returns:
-            List of matured antibodies (may be same or improved versions).
-        """
-        if not survivors:
-            return survivors
-
-        matured = []
-        total_improvements = 0
-
-        for parent in survivors:
-            best = deepcopy(parent)
-
-            for round_num in range(rounds):
-                # Generate mutant offspring
-                mutant = self._hypermutate(best)
-
-                # Evaluate mutant
-                self.evaluate_fitness(bars, [mutant], spread_points)
-
-                # Selection: better mutant replaces parent
-                if mutant.fitness > best.fitness:
-                    mutant.parent_id = best.antibody_id
-                    mutant.mutation_count = best.mutation_count + 1
-                    best = mutant
-                    total_improvements += 1
-
-            matured.append(best)
-
-        log.info(
-            "[VDJ] Affinity maturation: %d rounds x %d survivors = %d improvements",
-            rounds, len(survivors), total_improvements,
-        )
-
-        return matured
-
-    def _hypermutate(self, parent: Antibody) -> Antibody:
-        """
-        Create a mutant copy of an antibody with small parameter changes.
-        This is somatic hypermutation: random point mutations in the
-        variable region to improve binding affinity.
-        """
-        child = deepcopy(parent)
-
-        # Mutate V segment params
-        for key, val in child.v_segment.params.items():
-            if isinstance(val, (int, float)) and self.rng.random() < MATURATION_MUTATION_RATE:
-                jitter = self.rng.gauss(0, MATURATION_PARAM_JITTER)
-                new_val = val * (1.0 + jitter)
-                # Keep integer params as integers
-                child.v_segment.params[key] = int(round(new_val)) if isinstance(val, int) else new_val
-
-        # Mutate D segment params
-        for key, val in child.d_segment.params.items():
-            if isinstance(val, (int, float)) and self.rng.random() < MATURATION_MUTATION_RATE:
-                jitter = self.rng.gauss(0, MATURATION_PARAM_JITTER)
-                new_val = val * (1.0 + jitter)
-                child.d_segment.params[key] = int(round(new_val)) if isinstance(val, int) else new_val
-
-        # Mutate J segment params
-        for key, val in child.j_segment.params.items():
-            if isinstance(val, (int, float)) and self.rng.random() < MATURATION_MUTATION_RATE:
-                jitter = self.rng.gauss(0, MATURATION_PARAM_JITTER)
-                new_val = val * (1.0 + jitter)
-                child.j_segment.params[key] = int(round(new_val)) if isinstance(val, int) else new_val
-
-        # Recompute ID (mutation changes the antibody)
-        child.antibody_id = child.compute_id()
-        child.generation = parent.generation
-        child.fitness = 0.0  # Must be re-evaluated
-
-        return child
-
-    # ----------------------------------------------------------
-    # STEP 5: MEMORY B CELL FORMATION
-    # ----------------------------------------------------------
-
-    def form_memory_cells(self, matured: List[Antibody]) -> List[Antibody]:
-        """
-        Promote the best matured antibodies to memory B cell status.
-        Memory cells are persisted in the database and recalled for
-        rapid deployment when similar market conditions return.
-
-        Criteria for memory promotion:
-          - Posterior win rate >= 65%
-          - Profit factor >= 1.5
-          - Minimum 20 trades
-        """
-        new_memory = []
-
-        for ab in matured:
-            if (ab.posterior_wr >= MEMORY_MIN_WIN_RATE
-                    and ab.profit_factor >= MEMORY_MIN_PROFIT_FACTOR
-                    and ab.total_trades >= MEMORY_MIN_TRADES):
-                ab.is_memory_cell = True
-                ab.memory_since = datetime.now().isoformat()
-                new_memory.append(ab)
-                self._save_antibody(ab)
-
-        # Update in-memory list
-        existing_ids = {m.antibody_id for m in self.memory_cells}
-        for ab in new_memory:
-            if ab.antibody_id not in existing_ids:
-                self.memory_cells.append(ab)
-
-        # Trim memory to limit
-        if len(self.memory_cells) > MEMORY_CELL_LIMIT:
-            self.memory_cells.sort(key=lambda a: a.fitness, reverse=True)
-            self.memory_cells = self.memory_cells[:MEMORY_CELL_LIMIT]
-
-        log.info(
-            "[VDJ] Memory B cells: %d new, %d total stored",
-            len(new_memory), len(self.memory_cells),
-        )
-
-        return new_memory
-
-    # ----------------------------------------------------------
-    # FULL PIPELINE: Recombine -> Evaluate -> Select -> Mature -> Remember
-    # ----------------------------------------------------------
-
-    def run_full_cycle(
-        self,
-        bars: np.ndarray,
-        population_size: int = None,
-        spread_points: float = 2.0,
-    ) -> Dict:
-        """
-        Run the complete VDJ immune response cycle:
-
-        1. V(D)J Recombination: generate diverse antibody pool
-        2. Antigen Testing: evaluate fitness via backtesting
-        3. Clonal Selection: kill losers, keep winners
-        4. Affinity Maturation: optimize winner parameters
-        5. Memory Formation: persist the best permanently
-
-        Args:
-            bars: OHLCV numpy array (N x 5)
-            population_size: number of antibodies to generate
-            spread_points: trading cost
-
-        Returns:
-            Dict with cycle statistics and results.
-        """
-        t_start = time.time()
-        n = population_size or self.population_size
-
-        # Step 1: Recombination
-        antibodies = self.recombine(n)
-
-        # Step 2: Fitness evaluation
-        antibodies = self.evaluate_fitness(bars, antibodies, spread_points)
-
-        # Step 3: Clonal selection
-        survivors, dead = self.clonal_selection(antibodies)
-
-        # Step 4: Affinity maturation
-        matured = self.affinity_maturation(survivors, bars, spread_points=spread_points)
-
-        # Re-evaluate matured antibodies for final ranking
-        matured = self.evaluate_fitness(bars, matured, spread_points)
-
-        # Step 5: Memory formation
-        new_memory = self.form_memory_cells(matured)
-
-        elapsed = time.time() - t_start
-
-        # Generation statistics
-        gen_stats = {
-            "generation": self.generation,
-            "timestamp": datetime.now().isoformat(),
-            "population_size": n,
-            "survivors": len(survivors),
-            "memory_cells_added": len(new_memory),
-            "avg_fitness": float(np.mean([a.fitness for a in matured])) if matured else 0.0,
-            "best_fitness": matured[0].fitness if matured else 0.0,
-            "best_antibody_id": matured[0].antibody_id if matured else "",
-            "maturation_improvements": sum(1 for m, s in zip(matured, survivors) if m.fitness > s.fitness),
-            "total_memory_cells": len(self.memory_cells),
-            "elapsed_seconds": elapsed,
-        }
-        self._save_generation(gen_stats)
-
-        log.info(
-            "[VDJ] Full cycle complete: gen=%d | %d generated -> %d survived -> %d matured -> %d memorized | %.1fs",
-            self.generation, n, len(survivors), len(matured), len(new_memory), elapsed,
-        )
+        max_dd = 0.0
+        if trades:
+            cum = np.cumsum(trades)
+            peak = np.maximum.accumulate(cum)
+            dd = peak - cum
+            max_dd = float(np.max(dd)) if len(dd) > 0 else 0.0
 
         return {
-            "generation_stats": gen_stats,
-            "matured_antibodies": matured,
-            "new_memory_cells": new_memory,
-            "all_memory_cells": self.memory_cells,
-            "dead_count": len(dead),
+            "n_trades": n_trades,
+            "n_wins": n_wins,
+            "total_profit": total_profit,
+            "total_loss": total_loss,
+            "trade_returns": trades,
+            "max_drawdown": max_dd,
         }
-
-    # ----------------------------------------------------------
-    # SIGNAL GENERATION (for live trading integration)
-    # ----------------------------------------------------------
-
-    def get_active_antibody_signals(
-        self,
-        bars: np.ndarray,
-    ) -> List[Dict]:
-        """
-        Query all memory B cells for current signals.
-        This is the "secondary immune response" -- rapid recall of
-        known-good antibodies when the pathogen (market condition) returns.
-
-        Returns list of active antibody signals with direction and confidence.
-        """
-        if not self.memory_cells:
-            return []
-
-        close = bars[:, 3]
-        high = bars[:, 1]
-        low = bars[:, 2]
-        open_p = bars[:, 0]
-        volume = bars[:, 4] if bars.shape[1] > 4 else np.ones(len(close))
-
-        active_signals = []
-        i = len(close) - 1  # Current bar
-
-        for ab in self.memory_cells:
-            # Check regime filter
-            if not self._check_regime(ab.d_segment, open_p, high, low, close, volume, i):
-                continue
-
-            # Check entry signal
-            if self._check_entry(ab.v_segment, open_p, high, low, close, volume, i):
-                active_signals.append({
-                    "antibody_id": ab.antibody_id,
-                    "direction": ab.get_direction(),
-                    "confidence": ab.fitness,
-                    "win_rate": ab.posterior_wr,
-                    "profit_factor": ab.profit_factor,
-                    "v_type": ab.v_segment.segment_type.value,
-                    "d_type": ab.d_segment.segment_type.value,
-                    "j_type": ab.j_segment.segment_type.value,
-                    "te_fingerprint": ab.get_te_fingerprint(),
-                    "total_trades": ab.total_trades,
-                })
-
-        return active_signals
-
-    def get_antibody_consensus(
-        self,
-        bars: np.ndarray,
-    ) -> Dict:
-        """
-        Compute consensus signal from all active memory antibodies.
-        This is analogous to the polyclonal immune response where
-        multiple antibody types converge on the same target.
-
-        Returns:
-            {direction, confidence, n_active, n_long, n_short, details}
-        """
-        signals = self.get_active_antibody_signals(bars)
-
-        if not signals:
-            return {
-                "direction": 0,
-                "confidence": 0.0,
-                "n_active": 0,
-                "n_long": 0,
-                "n_short": 0,
-                "signals": [],
-            }
-
-        n_long = sum(1 for s in signals if s["direction"] > 0)
-        n_short = sum(1 for s in signals if s["direction"] < 0)
-
-        # Weighted vote by fitness
-        weighted_long = sum(s["confidence"] for s in signals if s["direction"] > 0)
-        weighted_short = sum(s["confidence"] for s in signals if s["direction"] < 0)
-        total_weight = weighted_long + weighted_short
-
-        if total_weight > 0:
-            if weighted_long > weighted_short:
-                direction = 1
-                confidence = weighted_long / total_weight
-            elif weighted_short > weighted_long:
-                direction = -1
-                confidence = weighted_short / total_weight
-            else:
-                direction = 0
-                confidence = 0.0
-        else:
-            direction = 0
-            confidence = 0.0
-
-        return {
-            "direction": direction,
-            "confidence": float(confidence),
-            "n_active": len(signals),
-            "n_long": n_long,
-            "n_short": n_short,
-            "weighted_long": float(weighted_long),
-            "weighted_short": float(weighted_short),
-            "signals": signals,
-        }
-
-    # ----------------------------------------------------------
-    # HELPER FUNCTIONS
-    # ----------------------------------------------------------
 
     @staticmethod
-    def _rsi(close: np.ndarray, period: int = 14) -> float:
+    def _check_regime(antibody: Dict, close, high, low, volume, i: int) -> bool:
+        """Simplified regime check based on D segment detection hints."""
+        d_def = D_SEGMENTS[antibody["d_name"]]
+        detection = d_def.get("detection", "")
+
+        if i < 50:
+            return False
+
+        # EMA trend detection
+        if "EMA(8) > EMA(21)" in detection:
+            ema8 = WalkForwardSimulator._ema(close[:i+1], 8)
+            ema21 = WalkForwardSimulator._ema(close[:i+1], 21)
+            if ">" in detection.split("EMA(21)")[0]:
+                return ema8 > ema21
+            else:
+                return ema8 < ema21
+
+        # ADX-based (approximated via directional movement)
+        if "ADX < 20" in detection:
+            returns = np.diff(close[i-20:i+1])
+            return np.std(returns) / (np.mean(np.abs(returns)) + 1e-10) > 0.8
+
+        # ATR spike
+        if "ATR(14) > 2" in detection:
+            atr14 = WalkForwardSimulator._atr_val(high[i-13:i+1], low[i-13:i+1], close[i-13:i+1])
+            atr50 = WalkForwardSimulator._atr_val(high[i-49:i+1], low[i-49:i+1], close[i-49:i+1])
+            return atr14 > 2 * atr50 if atr50 > 0 else False
+
+        # Volume based
+        if "volume > 5 * avg_volume" in detection:
+            avg_vol = np.mean(volume[i-20:i])
+            return volume[i] > 5 * avg_vol if avg_vol > 0 else False
+
+        # Compression
+        if "compression_ratio" in detection:
+            recent_range = np.max(high[i-10:i+1]) - np.min(low[i-10:i+1])
+            baseline_range = np.max(high[i-30:i-10]) - np.min(low[i-30:i-10])
+            return recent_range < baseline_range * 0.5 if baseline_range > 0 else False
+
+        # Session transition (approximate)
+        if "session" in detection.lower():
+            return True  # Always allow session-based
+
+        # Default: pass
+        return True
+
+    @staticmethod
+    def _check_entry(antibody: Dict, close, high, low, open_p, volume, i: int) -> int:
+        """
+        Check entry signal based on V segment signal type.
+        Returns: 1 (long), -1 (short), 0 (no signal)
+        """
+        v_def = V_SEGMENTS[antibody["v_name"]]
+        signal = v_def.get("signal", "")
+        lookbacks = v_def.get("lookback", [14])
+        lb = lookbacks[0] if lookbacks else 14
+
+        if i < lb + 5:
+            return 0
+
+        if signal == "momentum":
+            ret = (close[i] - close[i-lb]) / (close[i-lb] + 1e-10)
+            if ret > 0.005:
+                return 1
+            elif ret < -0.005:
+                return -1
+
+        elif signal == "rsi":
+            rsi = WalkForwardSimulator._rsi(close[:i+1], lb)
+            if rsi < 30:
+                return 1
+            elif rsi > 70:
+                return -1
+
+        elif signal == "bollinger_position":
+            sma = np.mean(close[i-lb+1:i+1])
+            std = np.std(close[i-lb+1:i+1])
+            if std > 0:
+                z = (close[i] - sma) / std
+                if z < -2.0:
+                    return 1
+                elif z > 2.0:
+                    return -1
+
+        elif signal == "ema_crossover":
+            fast = lookbacks[0] if len(lookbacks) > 0 else 8
+            slow = lookbacks[1] if len(lookbacks) > 1 else 21
+            if i < slow + 2:
+                return 0
+            f_now = WalkForwardSimulator._ema(close[:i+1], fast)
+            s_now = WalkForwardSimulator._ema(close[:i+1], slow)
+            f_prev = WalkForwardSimulator._ema(close[:i], fast)
+            s_prev = WalkForwardSimulator._ema(close[:i], slow)
+            if f_now > s_now and f_prev <= s_prev:
+                return 1
+            elif f_now < s_now and f_prev >= s_prev:
+                return -1
+
+        elif signal == "macd":
+            fast = lookbacks[0] if len(lookbacks) > 0 else 12
+            slow = lookbacks[1] if len(lookbacks) > 1 else 26
+            if i < slow + 2:
+                return 0
+            f_now = WalkForwardSimulator._ema(close[:i+1], fast)
+            s_now = WalkForwardSimulator._ema(close[:i+1], slow)
+            f_prev = WalkForwardSimulator._ema(close[:i], fast)
+            s_prev = WalkForwardSimulator._ema(close[:i], slow)
+            if (f_now - s_now) > 0 and (f_prev - s_prev) <= 0:
+                return 1
+            elif (f_now - s_now) < 0 and (f_prev - s_prev) >= 0:
+                return -1
+
+        elif signal == "mean_reversion":
+            sma = np.mean(close[i-lb+1:i+1])
+            std = np.std(close[i-lb+1:i+1])
+            if std > 0:
+                z = (close[i] - sma) / std
+                if z < -2.0:
+                    return 1
+                elif z > 2.0:
+                    return -1
+
+        elif signal == "trend_duration":
+            # Count consecutive bars in same direction
+            count = 0
+            for k in range(1, min(lb, i)):
+                if close[i-k] < close[i-k+1]:
+                    count += 1
+                else:
+                    break
+            if count > lb * 0.6:
+                return 1
+            count = 0
+            for k in range(1, min(lb, i)):
+                if close[i-k] > close[i-k+1]:
+                    count += 1
+                else:
+                    break
+            if count > lb * 0.6:
+                return -1
+
+        elif signal == "trend_strength":
+            ema8 = WalkForwardSimulator._ema(close[:i+1], 8)
+            ema21 = WalkForwardSimulator._ema(close[:i+1], 21)
+            diff = (ema8 - ema21) / (ema21 + 1e-10)
+            if diff > 0.005:
+                return 1
+            elif diff < -0.005:
+                return -1
+
+        elif signal == "tick_volume":
+            avg_vol = np.mean(volume[i-lb:i])
+            if avg_vol > 0 and volume[i] > 2 * avg_vol:
+                return 1 if close[i] > open_p[i] else -1
+
+        elif signal == "candle_pattern":
+            if i < 2:
+                return 0
+            body = close[i] - open_p[i]
+            rng = high[i] - low[i]
+            if rng > 0 and abs(body) / rng > 0.6:
+                return 1 if body > 0 else -1
+
+        elif signal in ("compression_ratio", "compression_breakout"):
+            recent_range = np.max(high[i-5:i+1]) - np.min(low[i-5:i+1])
+            baseline_range = np.max(high[i-30:i-5]) - np.min(low[i-30:i-5])
+            if baseline_range > 0 and recent_range > baseline_range * 0.5:
+                return 1 if close[i] > close[i-1] else -1
+
+        elif signal in ("short_volatility", "atr_ratio"):
+            atr5 = WalkForwardSimulator._atr_val(high[i-4:i+1], low[i-4:i+1], close[i-4:i+1])
+            atr20 = WalkForwardSimulator._atr_val(high[i-19:i+1], low[i-19:i+1], close[i-19:i+1])
+            if atr20 > 0 and atr5 / atr20 > 1.5:
+                return 1 if close[i] > close[i-1] else -1
+
+        elif signal == "support_resistance":
+            high_20 = np.max(high[i-20:i])
+            low_20 = np.min(low[i-20:i])
+            rng = high_20 - low_20
+            if rng > 0:
+                pos = (close[i] - low_20) / rng
+                if pos < 0.1:
+                    return 1
+                elif pos > 0.9:
+                    return -1
+
+        elif signal == "price_change":
+            ret = (close[i] - close[i-1]) / (close[i-1] + 1e-10)
+            if abs(ret) > 0.005:
+                return 1 if ret > 0 else -1
+
+        elif signal == "signal_noise_ratio":
+            returns = np.diff(close[i-lb:i+1])
+            if len(returns) > 2:
+                snr = abs(np.mean(returns)) / (np.std(returns) + 1e-10)
+                if snr > 0.3:
+                    return 1 if np.mean(returns) > 0 else -1
+
+        elif signal == "drawdown":
+            # TRIM28 risk-off: suppress entry during drawdown
+            return 0
+
+        # Fallback for other signals: momentum-like
+        elif signal in ("order_flow", "gap_analysis", "session_overlap",
+                        "diversity_index", "multi_tf_variance", "cross_correlation",
+                        "successful_pattern_echo", "fractal_dim", "autocorrelation",
+                        "microstructure", "pattern_repetition", "volume_profile",
+                        "spread_analysis", "noise_pattern", "mutation_rate"):
+            ret = (close[i] - close[i-min(lb, 5)]) / (close[i-min(lb, 5)] + 1e-10)
+            if abs(ret) > 0.003:
+                return 1 if ret > 0 else -1
+
+        return 0
+
+    @staticmethod
+    def _rsi(close, period=14):
         if len(close) < period + 1:
             return 50.0
         deltas = np.diff(close[-(period + 1):])
@@ -1660,7 +526,7 @@ class VDJRecombinationEngine:
         return 100.0 - (100.0 / (1.0 + rs))
 
     @staticmethod
-    def _ema_val(data: np.ndarray, period: int) -> float:
+    def _ema(data, period):
         if len(data) < period:
             return float(np.mean(data))
         mult = 2.0 / (period + 1)
@@ -1670,175 +536,639 @@ class VDJRecombinationEngine:
         return ema
 
     @staticmethod
-    def _compute_atr(high, low, close, period=14) -> np.ndarray:
-        """Compute ATR array."""
+    def _compute_atr(high, low, close, period=14):
         n = len(close)
         atr = np.zeros(n)
         for i in range(1, n):
-            tr = max(
-                high[i] - low[i],
-                abs(high[i] - close[i-1]),
-                abs(low[i] - close[i-1]),
-            )
-            if i < period:
-                atr[i] = tr
-            else:
-                atr[i] = (atr[i-1] * (period - 1) + tr) / period
+            tr = max(high[i] - low[i], abs(high[i] - close[i-1]), abs(low[i] - close[i-1]))
+            atr[i] = tr if i < period else (atr[i-1] * (period - 1) + tr) / period
         return atr
 
     @staticmethod
-    def _atr_val(high, low, close) -> float:
-        """Compute single ATR value."""
+    def _atr_val(high, low, close):
         if len(high) < 2:
             return float(high[0] - low[0]) if len(high) > 0 else 0.0
         trs = []
         for i in range(1, len(high)):
-            tr = max(
-                high[i] - low[i],
-                abs(high[i] - close[i-1]),
-                abs(low[i] - close[i-1]),
-            )
-            trs.append(tr)
+            trs.append(max(high[i] - low[i], abs(high[i] - close[i-1]), abs(low[i] - close[i-1])))
         return float(np.mean(trs)) if trs else 0.0
 
 
 # ============================================================
-# TEQA INTEGRATION: VDJ Bridge
+# MEMORY CELL DATABASE
 # ============================================================
 
-class VDJTEQABridge:
+class VDJMemoryDB:
+    """SQLite database for memory B cells (domesticated strategies)."""
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self._init_db()
+
+    def _init_db(self):
+        try:
+            with sqlite3.connect(self.db_path, timeout=5) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS memory_cells (
+                        antibody_id     TEXT PRIMARY KEY,
+                        v_segment       TEXT NOT NULL,
+                        d_segment       TEXT NOT NULL,
+                        j_segment       TEXT NOT NULL,
+                        v_params        TEXT,
+                        d_params        TEXT,
+                        j_params        TEXT,
+                        fitness         REAL NOT NULL,
+                        posterior_wr    REAL,
+                        profit_factor   REAL,
+                        sortino         REAL,
+                        n_trades        INTEGER,
+                        n_wins          INTEGER,
+                        generation      INTEGER,
+                        parent_id       TEXT,
+                        maturation_rounds INTEGER DEFAULT 0,
+                        created_at      TEXT,
+                        last_activated  TEXT,
+                        activation_count INTEGER DEFAULT 0,
+                        active          INTEGER DEFAULT 1,
+                        te_source       TEXT
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS vdj_generations (
+                        generation      INTEGER PRIMARY KEY,
+                        timestamp       TEXT,
+                        population_size INTEGER,
+                        survivors       INTEGER,
+                        memory_added    INTEGER,
+                        avg_fitness     REAL,
+                        best_fitness    REAL,
+                        best_id         TEXT,
+                        maturation_improvements INTEGER
+                    )
+                """)
+                conn.commit()
+        except Exception as e:
+            log.warning("VDJ DB init failed: %s", e)
+
+    def save_memory_cell(self, ab: Dict):
+        try:
+            with sqlite3.connect(self.db_path, timeout=5) as conn:
+                now = datetime.now().isoformat()
+                te_source = V_SEGMENTS.get(ab.get("v_name", ""), {}).get("te_source", "")
+                conn.execute("""
+                    INSERT OR REPLACE INTO memory_cells VALUES
+                    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    ab["antibody_id"], ab["v_name"], ab["d_name"], ab["j_name"],
+                    json.dumps(ab.get("perturbed_v_params", {})),
+                    json.dumps(ab.get("perturbed_d_params", {})),
+                    json.dumps(ab.get("perturbed_j_params", {})),
+                    ab.get("fitness", 0), ab.get("posterior_wr", 0.5),
+                    ab.get("profit_factor", 0), ab.get("sortino", 0),
+                    ab.get("n_trades", 0), ab.get("n_wins", 0),
+                    ab.get("generation", 0), ab.get("parent_id", ""),
+                    ab.get("maturation_rounds", 0),
+                    ab.get("created_at", now), now, 0, 1, te_source,
+                ))
+                conn.commit()
+        except Exception as e:
+            log.warning("Failed to save memory cell %s: %s", ab.get("antibody_id"), e)
+
+    def load_memory_cells(self) -> List[Dict]:
+        cells = []
+        try:
+            with sqlite3.connect(self.db_path, timeout=5) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute("""
+                    SELECT * FROM memory_cells
+                    WHERE active = 1 AND fitness >= ?
+                    ORDER BY fitness DESC
+                """, (MEMORY_THRESHOLD,)).fetchall()
+                for row in rows:
+                    cells.append({
+                        "antibody_id": row["antibody_id"],
+                        "v_name": row["v_segment"],
+                        "d_name": row["d_segment"],
+                        "j_name": row["j_segment"],
+                        "perturbed_v_params": json.loads(row["v_params"] or "{}"),
+                        "perturbed_d_params": json.loads(row["d_params"] or "{}"),
+                        "perturbed_j_params": json.loads(row["j_params"] or "{}"),
+                        "fitness": row["fitness"],
+                        "posterior_wr": row["posterior_wr"],
+                        "n_trades": row["n_trades"],
+                        "n_wins": row["n_wins"],
+                        "generation": row["generation"],
+                        "last_activated": row["last_activated"],
+                        "source": "MEMORY_CELL",
+                    })
+        except Exception as e:
+            log.warning("Failed to load memory cells: %s", e)
+        return cells
+
+    def save_generation(self, stats: Dict):
+        try:
+            with sqlite3.connect(self.db_path, timeout=5) as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO vdj_generations VALUES (?,?,?,?,?,?,?,?,?)
+                """, (
+                    stats["generation"], stats["timestamp"],
+                    stats["population_size"], stats["survivors"],
+                    stats["memory_added"], stats["avg_fitness"],
+                    stats["best_fitness"], stats["best_id"],
+                    stats["maturation_improvements"],
+                ))
+                conn.commit()
+        except Exception as e:
+            log.warning("Failed to save generation: %s", e)
+
+
+# ============================================================
+# VDJ RECOMBINATION ENGINE -- 9-Phase Algorithm
+# ============================================================
+
+class VDJRecombinationEngine:
     """
-    Bridges VDJ Recombination engine with the existing TEQA v3.0 system.
+    V(D)J Recombination Engine for adaptive strategy generation.
 
-    The bridge:
-      1. Maps antibody signals to TE activation patterns
-      2. Feeds antibody consensus into the TEQA pipeline as an additional gate
-      3. Records trade outcomes back to the VDJ system for re-evaluation
-      4. Writes antibody signals to JSON for MQL5 EA consumption
+    Integrates with TEQAv3Engine by:
+        1. Consuming te_activations from TEActivationEngine
+        2. Using shock_level from GenomicShockDetector
+        3. Writing to TEDomesticationTracker via memory cell promotion
+        4. Running ALONGSIDE the main TEQA pipeline, not replacing it
 
-    This is how the domesticated Transib (RAG1/RAG2) feeds back into
-    the broader transposon ecosystem.
+    The VDJ engine provides strategy selection (which V+D+J combo)
+    while TEQA provides the real-time directional signal.
     """
 
     def __init__(
         self,
-        vdj_engine: VDJRecombinationEngine,
-        signal_file: str = None,
+        memory_db_path: str = None,
+        max_active: int = MAX_ACTIVE_ANTIBODIES,
+        generation_size: int = GENERATION_SIZE,
+        eval_window: int = EVALUATION_WINDOW_BARS,
+        seed: int = None,
     ):
-        self.vdj = vdj_engine
-        if signal_file is None:
-            self.signal_file = str(
-                Path(__file__).parent / "vdj_antibody_signal.json"
-            )
-        else:
-            self.signal_file = signal_file
+        self.db = VDJMemoryDB(
+            memory_db_path or str(Path(__file__).parent / "vdj_memory_cells.db")
+        )
+        self.max_active = max_active
+        self.generation_size = generation_size
+        self.eval_window = eval_window
+        self.rng = np.random.RandomState(seed)
 
-    def get_vdj_gate_result(self, bars: np.ndarray) -> Dict:
+        self.active_antibodies: List[Dict] = []
+        self.bone_marrow_pool: List[Dict] = []
+        self.memory_cells: List[Dict] = self.db.load_memory_cells()
+        self.generation = 0
+
+        log.info("[VDJ] Engine initialized: %d memory cells loaded", len(self.memory_cells))
+
+    # ----------------------------------------------------------
+    # MAIN ENTRY POINT: run_cycle (9-Phase Algorithm)
+    # ----------------------------------------------------------
+
+    def run_cycle(
+        self,
+        bars: np.ndarray,
+        symbol: str,
+        te_activations: List[Dict],
+        shock_level: float,
+        shock_label: str,
+        drawdown: float = 0.0,
+    ) -> Dict:
         """
-        Compute VDJ antibody gate result for integration with Jardine's Gate.
+        Execute one full VDJ recombination cycle (9 phases).
 
-        This becomes Gate G11 (VDJ Immune Response) in the extended gate system.
+        Args:
+            bars: OHLCV numpy array
+            symbol: trading instrument
+            te_activations: from TEActivationEngine
+            shock_level: from GenomicShockDetector
+            shock_label: CALM/NORMAL/ELEVATED/SHOCK/EXTREME
+            drawdown: current drawdown fraction
 
         Returns:
-            {
-                "gate_pass": bool,
-                "direction": int,
-                "confidence": float,
-                "n_active_antibodies": int,
-                "antibody_consensus": dict,
-            }
+            dict with action, confidence, lot_mult, strategy details
         """
-        consensus = self.vdj.get_antibody_consensus(bars)
+        t_start = time.time()
 
-        # Gate passes if:
-        # 1. At least 2 antibodies are active (polyclonal response)
-        # 2. Consensus confidence exceeds 0.6
-        gate_pass = (
-            consensus["n_active"] >= 2
-            and consensus["confidence"] >= 0.6
+        # ============ PHASE 0: TRIM28 CHECK ============
+        if shock_label == "EXTREME":
+            return {
+                "action": "HOLD", "confidence": 0.0, "lot_mult": 1.0,
+                "source": "TRIM28_SUPPRESSION", "generation": self.generation,
+                "population_stats": self._pop_stats(),
+            }
+
+        # ============ PHASE 1: MEMORY CELL RECALL ============
+        memory_signal = self._phase1_memory_recall(bars, te_activations, shock_label)
+        if memory_signal is not None:
+            return memory_signal
+
+        # ============ PHASE 2: BONE MARROW GENERATION ============
+        self._phase2_bone_marrow(te_activations, shock_level)
+
+        # ============ PHASE 3: THYMIC SELECTION ============
+        self._phase3_thymic_selection()
+
+        # ============ PHASE 4: ANTIGEN EXPOSURE ============
+        self._phase4_antigen_exposure(bars)
+
+        # ============ PHASE 5: CLONAL SELECTION ============
+        proliferators, memory_candidates = self._phase5_clonal_selection()
+
+        # ============ PHASE 6: AFFINITY MATURATION ============
+        self._phase6_affinity_maturation(proliferators, bars)
+
+        # ============ PHASE 7: MEMORY B CELL PROMOTION ============
+        new_memory = self._phase7_memory_promotion(memory_candidates)
+
+        # ============ PHASE 8: CONSENSUS SIGNAL ============
+        result = self._phase8_consensus_signal(bars, te_activations)
+
+        # ============ PHASE 9: GENERATION ADVANCEMENT ============
+        self.generation += 1
+        elapsed = time.time() - t_start
+
+        self.db.save_generation({
+            "generation": self.generation,
+            "timestamp": datetime.now().isoformat(),
+            "population_size": len(self.active_antibodies) + len(self.bone_marrow_pool),
+            "survivors": len(self.active_antibodies),
+            "memory_added": len(new_memory),
+            "avg_fitness": np.mean([a.get("fitness", 0) for a in self.active_antibodies]) if self.active_antibodies else 0,
+            "best_fitness": max((a.get("fitness", 0) for a in self.active_antibodies), default=0),
+            "best_id": self.active_antibodies[0].get("antibody_id", "") if self.active_antibodies else "",
+            "maturation_improvements": result.get("maturation_improvements", 0),
+        })
+
+        result["generation"] = self.generation
+        result["population_stats"] = self._pop_stats()
+        result["elapsed_seconds"] = elapsed
+
+        log.info(
+            "[VDJ] Cycle complete: gen=%d active=%d memory=%d action=%s conf=%.3f | %.1fs",
+            self.generation, len(self.active_antibodies),
+            len(self.memory_cells), result["action"],
+            result["confidence"], elapsed,
         )
 
-        return {
-            "gate_pass": gate_pass,
-            "direction": consensus["direction"],
-            "confidence": consensus["confidence"],
-            "n_active_antibodies": consensus["n_active"],
-            "antibody_consensus": consensus,
-        }
+        return result
 
-    def write_signal_file(self, bars: np.ndarray):
-        """
-        Write current antibody signals to JSON for MQL5 EA consumption.
+    # ----------------------------------------------------------
+    # PHASE IMPLEMENTATIONS
+    # ----------------------------------------------------------
 
-        The MQL5 EA reads this file to incorporate immune response signals
-        into its trading decisions.
-        """
-        consensus = self.vdj.get_antibody_consensus(bars)
-        gate = self.get_vdj_gate_result(bars)
+    def _phase1_memory_recall(
+        self, bars: np.ndarray, te_activations: List[Dict], shock_label: str
+    ) -> Optional[Dict]:
+        """Phase 1: Check if any memory B cells match current conditions."""
+        if not self.memory_cells:
+            return None
 
-        signal = {
-            "version": VERSION,
-            "timestamp": datetime.now().isoformat(),
-            "direction": consensus["direction"],
-            "confidence": consensus["confidence"],
-            "gate_pass": gate["gate_pass"],
-            "n_active": consensus["n_active"],
-            "n_long": consensus["n_long"],
-            "n_short": consensus["n_short"],
-            "weighted_long": consensus.get("weighted_long", 0),
-            "weighted_short": consensus.get("weighted_short", 0),
-            "memory_cells_total": len(self.vdj.memory_cells),
-            "generation": self.vdj.generation,
-            # Individual antibody signals for the EA
-            "antibodies": [
-                {
-                    "id": s["antibody_id"][:8],
-                    "dir": s["direction"],
-                    "conf": round(s["confidence"], 4),
-                    "wr": round(s["win_rate"], 4),
-                    "pf": round(s["profit_factor"], 2),
-                    "v": s["v_type"],
-                    "d": s["d_type"],
-                    "j": s["j_type"],
+        best_match = None
+        best_fitness = 0.0
+
+        for mc in self.memory_cells:
+            v_name = mc["v_name"]
+            te_source = V_SEGMENTS.get(v_name, {}).get("te_source", "")
+
+            # Check TE activation
+            te_act = next((a for a in te_activations if a.get("te") == te_source), None)
+            if te_act is None or te_act.get("strength", 0) < 0.5:
+                continue
+
+            # Check regime match
+            d_regime = D_SEGMENTS.get(mc["d_name"], {}).get("regime", "")
+            if shock_label in ("SHOCK", "EXTREME") and d_regime not in ("HIGH_VOLATILITY", "NEWS_SHOCK"):
+                continue
+
+            # Check expiry
+            last_act = mc.get("last_activated")
+            if last_act:
+                try:
+                    days_since = (datetime.now() - datetime.fromisoformat(last_act)).days
+                    if days_since > DOMESTICATION_EXPIRY_DAYS:
+                        continue
+                except (ValueError, TypeError):
+                    pass
+
+            if mc.get("fitness", 0) > best_fitness:
+                best_fitness = mc["fitness"]
+                best_match = mc
+
+        if best_match is not None and best_fitness >= MEMORY_THRESHOLD:
+            # Quick signal check
+            entry = WalkForwardSimulator._check_entry(
+                best_match, bars[:, 3], bars[:, 1], bars[:, 2], bars[:, 0],
+                bars[:, 4] if bars.shape[1] > 4 else np.ones(len(bars)),
+                len(bars) - 1
+            )
+            if entry != 0:
+                return {
+                    "action": "BUY" if entry > 0 else "SELL",
+                    "confidence": min(1.0, best_fitness * 1.2),
+                    "lot_mult": 1.0 + 0.3 * max(0, best_fitness - SURVIVAL_THRESHOLD),
+                    "source": f"MEMORY_RECALL:{best_match['antibody_id'][:8]}",
+                    "strategy_id": best_match["antibody_id"],
+                    "v_segment": best_match["v_name"],
+                    "d_segment": best_match["d_name"],
+                    "j_segment": best_match["j_name"],
+                    "fitness": best_fitness,
+                    "generation": self.generation,
+                    "population_stats": self._pop_stats(),
                 }
-                for s in consensus.get("signals", [])
-            ],
+
+        return None
+
+    def _phase2_bone_marrow(self, te_activations: List[Dict], shock_level: float):
+        """Phase 2: Generate new antibodies via quantum circuit."""
+        if len(self.bone_marrow_pool) >= self.generation_size:
+            return
+
+        n_needed = self.generation_size - len(self.bone_marrow_pool)
+
+        # Determine exit bias from strongest D regime
+        exit_bias = "trail"  # default
+
+        candidates = execute_vdj_circuit(
+            te_activations=te_activations,
+            shock_level=shock_level,
+            exit_bias=exit_bias,
+            shots=4096,
+            n_candidates=n_needed * 2,
+            rng=self.rng,
+        )
+
+        for sel in candidates:
+            if len(self.bone_marrow_pool) >= self.generation_size:
+                break
+
+            antibody = {
+                "v_name": sel["v_name"],
+                "d_name": sel["d_name"],
+                "j_name": sel["j_name"],
+                "generation": self.generation + 1,
+                "fitness": 0.0,
+                "parent_id": "",
+                "maturation_rounds": 0,
+            }
+
+            # Apply junctional diversity
+            seed = hash(f"{sel['v_name']}_{sel['d_name']}_{sel['j_name']}_{self.rng.randint(0, 999999)}")
+            antibody = apply_junctional_diversity(antibody, seed & 0x7FFFFFFF, shock_level)
+            antibody["antibody_id"] = _make_antibody_id(
+                sel["v_name"], sel["d_name"], sel["j_name"],
+                antibody.get("perturbed_j_params", {})
+            )
+
+            self.bone_marrow_pool.append(antibody)
+
+        log.info("[VDJ] Phase 2: %d antibodies in bone marrow", len(self.bone_marrow_pool))
+
+    def _phase3_thymic_selection(self):
+        """Phase 3: Kill antibodies that violate risk management rules."""
+        safe = []
+        killed = 0
+        for ab in self.bone_marrow_pool:
+            if thymic_selection(ab):
+                safe.append(ab)
+            else:
+                killed += 1
+        self.bone_marrow_pool = safe
+        if killed > 0:
+            log.info("[VDJ] Phase 3: %d antibodies killed by thymic selection", killed)
+
+    def _phase4_antigen_exposure(self, bars: np.ndarray):
+        """Phase 4: Move from bone marrow to active, run walk-forward test."""
+        # Graduate from bone marrow
+        slots = self.max_active - len(self.active_antibodies)
+        if slots > 0:
+            graduates = self.bone_marrow_pool[:slots]
+            self.bone_marrow_pool = self.bone_marrow_pool[slots:]
+            self.active_antibodies.extend(graduates)
+
+        # Evaluate all active antibodies
+        eval_bars = bars[-self.eval_window:] if len(bars) > self.eval_window else bars
+        for ab in self.active_antibodies:
+            result = WalkForwardSimulator.simulate(ab, eval_bars)
+            ab["fitness"] = fitness_clonal_selection(result)
+            metrics = compute_detailed_metrics(result)
+            ab.update({
+                "n_trades": result["n_trades"],
+                "n_wins": result["n_wins"],
+                "total_profit": result["total_profit"],
+                "total_loss": result["total_loss"],
+                "max_drawdown": result["max_drawdown"],
+                "posterior_wr": metrics["posterior_wr"],
+                "profit_factor": metrics["profit_factor"],
+                "sortino": metrics["sortino"],
+                "trade_returns": result["trade_returns"],
+            })
+
+        # Sort by fitness
+        self.active_antibodies.sort(key=lambda a: a.get("fitness", 0), reverse=True)
+        log.info("[VDJ] Phase 4: %d antibodies evaluated", len(self.active_antibodies))
+
+    def _phase5_clonal_selection(self):
+        """Phase 5: Classify antibodies by fitness threshold."""
+        selection = classify_population(self.active_antibodies)
+
+        # Keep only survivors (includes proliferators and memory candidates)
+        self.active_antibodies = selection["survivors"]
+
+        # Ensure minimum population
+        if len(self.active_antibodies) < MIN_ACTIVE_ANTIBODIES:
+            # Keep some anergic ones to maintain diversity
+            deficit = MIN_ACTIVE_ANTIBODIES - len(self.active_antibodies)
+            self.active_antibodies.extend(selection["anergic"][:deficit])
+
+        log.info(
+            "[VDJ] Phase 5: %d dead, %d survive, %d proliferate, %d memory candidates",
+            len(selection["dead"]), len(self.active_antibodies),
+            len(selection["proliferators"]), len(selection["memory_candidates"]),
+        )
+
+        return selection["proliferators"], selection["memory_candidates"]
+
+    def _phase6_affinity_maturation(self, proliferators: List[Dict], bars: np.ndarray):
+        """Phase 6: Mutate winning antibodies, test mutants."""
+        improvements = 0
+        eval_bars = bars[-self.eval_window:] if len(bars) > self.eval_window else bars
+
+        for parent in proliferators:
+            mutants = mutate_winner(
+                parent,
+                n_mutants=5,
+                generation=parent.get("generation", 0),
+                rng=self.rng,
+            )
+
+            for mutant in mutants:
+                result = WalkForwardSimulator.simulate(mutant, eval_bars)
+                mutant["fitness"] = fitness_clonal_selection(result)
+
+            # Keep best mutant if better than parent
+            if mutants:
+                best_mutant = max(mutants, key=lambda m: m.get("fitness", 0))
+                if best_mutant.get("fitness", 0) > parent.get("fitness", 0):
+                    best_mutant["maturation_rounds"] = parent.get("maturation_rounds", 0) + 1
+                    self.active_antibodies.append(best_mutant)
+                    improvements += 1
+
+        # Enforce population cap: keep only top N by fitness
+        if len(self.active_antibodies) > self.max_active:
+            self.active_antibodies.sort(key=lambda a: a.get("fitness", 0), reverse=True)
+            self.active_antibodies = self.active_antibodies[:self.max_active]
+
+        log.info("[VDJ] Phase 6: %d maturation improvements", improvements)
+        return improvements
+
+    def _phase7_memory_promotion(self, memory_candidates: List[Dict]) -> List[Dict]:
+        """Phase 7: Promote exceptional antibodies to memory B cell status."""
+        new_memory = []
+        for ab in memory_candidates:
+            if (ab.get("fitness", 0) >= MEMORY_THRESHOLD
+                    and ab.get("maturation_rounds", 0) >= 3):
+                ab["created_at"] = datetime.now().isoformat()
+                self.db.save_memory_cell(ab)
+                new_memory.append(ab)
+
+                # Register in domestication tracker if available
+                te_source = V_SEGMENTS.get(ab.get("v_name", ""), {}).get("te_source", "")
+                log.info(
+                    "[VDJ] MEMORY B CELL: %s fitness=%.3f WR=%.1f%% TE=%s",
+                    ab.get("antibody_id", "")[:8], ab.get("fitness", 0),
+                    ab.get("posterior_wr", 0.5) * 100, te_source,
+                )
+
+        # Update in-memory list
+        existing_ids = {m["antibody_id"] for m in self.memory_cells}
+        for ab in new_memory:
+            if ab["antibody_id"] not in existing_ids:
+                self.memory_cells.append(ab)
+
+        log.info("[VDJ] Phase 7: %d new memory cells, %d total", len(new_memory), len(self.memory_cells))
+        return new_memory
+
+    def _phase8_consensus_signal(self, bars: np.ndarray, te_activations: List[Dict]) -> Dict:
+        """Phase 8: Fitness-weighted vote from all active antibodies."""
+        votes = []
+        i = len(bars) - 1
+
+        for ab in self.active_antibodies:
+            entry = WalkForwardSimulator._check_entry(
+                ab, bars[:, 3], bars[:, 1], bars[:, 2], bars[:, 0],
+                bars[:, 4] if bars.shape[1] > 4 else np.ones(len(bars)),
+                i
+            )
+            if entry != 0:
+                votes.append({
+                    "direction": entry,
+                    "fitness": ab.get("fitness", 0),
+                    "antibody_id": ab.get("antibody_id", ""),
+                })
+
+        if not votes:
+            return {
+                "action": "HOLD", "confidence": 0.0, "lot_mult": 1.0,
+                "source": "VDJ_NO_SIGNAL",
+            }
+
+        total_fitness = sum(v["fitness"] for v in votes)
+        if total_fitness <= 0:
+            return {
+                "action": "HOLD", "confidence": 0.0, "lot_mult": 1.0,
+                "source": "VDJ_LOW_FITNESS",
+            }
+
+        weighted_dir = sum(
+            v["direction"] * v["fitness"] for v in votes
+        ) / total_fitness
+
+        if weighted_dir > 0.1:
+            action = "BUY"
+        elif weighted_dir < -0.1:
+            action = "SELL"
+        else:
+            action = "HOLD"
+
+        confidence = min(1.0, abs(weighted_dir))
+        best_fitness = max(v["fitness"] for v in votes)
+        lot_mult = 1.0 + 0.3 * max(0, best_fitness - SURVIVAL_THRESHOLD)
+
+        # Find the best matching antibody for strategy details
+        best_vote = max(votes, key=lambda v: v["fitness"])
+        best_ab = next((a for a in self.active_antibodies
+                        if a.get("antibody_id") == best_vote["antibody_id"]), {})
+
+        return {
+            "action": action,
+            "confidence": confidence,
+            "lot_mult": lot_mult,
+            "source": f"VDJ_GEN{self.generation + 1}",
+            "strategy_id": best_vote.get("antibody_id", ""),
+            "v_segment": best_ab.get("v_name", ""),
+            "d_segment": best_ab.get("d_name", ""),
+            "j_segment": best_ab.get("j_name", ""),
+            "fitness": best_fitness,
+            "n_voters": len(votes),
+            "weighted_direction": weighted_dir,
+            "maturation_improvements": 0,
         }
 
-        try:
-            tmp_path = self.signal_file + ".tmp"
-            with open(tmp_path, "w") as f:
-                json.dump(signal, f, indent=2)
-            os.replace(tmp_path, self.signal_file)
-        except Exception as e:
-            log.warning("Failed to write VDJ signal file: %s", e)
-
-    def record_trade_outcome(self, antibody_id: str, won: bool, pnl: float = 0.0):
-        """
-        Record a trade outcome for a specific antibody.
-        This feeds back into the immune system for continued learning.
-        """
-        for ab in self.vdj.memory_cells:
-            if ab.antibody_id == antibody_id or ab.antibody_id[:8] == antibody_id:
-                if won:
-                    ab.total_trades += 1
-                    # Update running stats
-                    ab.posterior_wr = (
-                        (PRIOR_ALPHA + ab.total_trades * ab.win_rate + 1)
-                        / (PRIOR_ALPHA + PRIOR_BETA + ab.total_trades + 1)
-                    )
-                else:
-                    ab.total_trades += 1
-                    ab.posterior_wr = (
-                        (PRIOR_ALPHA + ab.total_trades * ab.win_rate)
-                        / (PRIOR_ALPHA + PRIOR_BETA + ab.total_trades + 1)
-                    )
-                self.vdj._save_antibody(ab)
-                break
+    def _pop_stats(self) -> Dict:
+        return {
+            "active": len(self.active_antibodies),
+            "bone_marrow": len(self.bone_marrow_pool),
+            "memory": len(self.memory_cells),
+            "generation": self.generation,
+        }
 
 
 # ============================================================
-# STANDALONE TEST / DEMONSTRATION
+# TEQA BRIDGE
+# ============================================================
+
+class VDJTEQABridge:
+    """
+    Bridges VDJ engine with the TEQA v3.0 pipeline.
+    Writes antibody signals to JSON for MQL5 EA consumption.
+    """
+
+    def __init__(self, vdj_engine: VDJRecombinationEngine, signal_file: str = None):
+        self.vdj = vdj_engine
+        self.signal_file = signal_file or str(
+            Path(__file__).parent / "vdj_antibody_signal.json"
+        )
+
+    def write_signal_file(self, vdj_result: Dict):
+        signal = {
+            "version": VERSION,
+            "timestamp": datetime.now().isoformat(),
+            "action": vdj_result.get("action", "HOLD"),
+            "confidence": vdj_result.get("confidence", 0),
+            "lot_mult": vdj_result.get("lot_mult", 1.0),
+            "source": vdj_result.get("source", ""),
+            "v_segment": vdj_result.get("v_segment", ""),
+            "d_segment": vdj_result.get("d_segment", ""),
+            "j_segment": vdj_result.get("j_segment", ""),
+            "fitness": vdj_result.get("fitness", 0),
+            "generation": vdj_result.get("generation", 0),
+            "population": vdj_result.get("population_stats", {}),
+        }
+        try:
+            tmp = self.signal_file + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(signal, f, indent=2)
+            os.replace(tmp, self.signal_file)
+        except Exception as e:
+            log.warning("Failed to write VDJ signal: %s", e)
+
+
+# ============================================================
+# STANDALONE TEST
 # ============================================================
 
 if __name__ == "__main__":
@@ -1848,121 +1178,129 @@ if __name__ == "__main__":
         datefmt='%H:%M:%S',
     )
 
+    from vdj_segments import count_valid_combinations
+
     print("=" * 76)
-    print("  VDJ RECOMBINATION ENGINE -- Adaptive Immune Trading System")
-    print("  RAG1/RAG2 Domesticated Transib -> Vertebrate Adaptive Immunity")
+    print("  VDJ RECOMBINATION ENGINE v2.0")
+    print("  RAG1/RAG2 Domesticated Transib -> Adaptive Immune Trading System")
     print("=" * 76)
 
-    # Generate synthetic OHLCV data with a trend + mean-reversion pattern
+    # Synthetic data: clear uptrend with pullbacks (so strategies can profit)
     np.random.seed(42)
-    n_bars = 500
-    # Create a market with a slight upward trend and mean-reversion
-    returns = np.random.randn(n_bars) * 0.008 + 0.0002  # Slight drift
-    # Add mean-reversion autocorrelation
-    for i in range(1, len(returns)):
-        returns[i] -= 0.3 * returns[i-1]  # Mean-reverting component
-    close = 50000 + np.cumsum(returns) * 50000
-    close = np.maximum(close, 100)  # Floor
-
-    high = close + np.abs(np.random.randn(n_bars) * close * 0.003)
-    low = close - np.abs(np.random.randn(n_bars) * close * 0.003)
-    open_p = close + np.random.randn(n_bars) * close * 0.001
+    n_bars = 600
+    # Strong uptrend: +0.3% per bar drift with noise
+    returns = np.random.randn(n_bars) * 0.005 + 0.003
+    # Add mean-reversion pullbacks every ~50 bars
+    for i in range(n_bars):
+        if i % 50 < 10:
+            returns[i] -= 0.004  # Pullback periods
+    close = np.zeros(n_bars)
+    close[0] = 50000
+    for i in range(1, n_bars):
+        close[i] = close[i-1] * (1 + returns[i])
+    close = np.maximum(close, 100)
+    high = close * (1 + np.abs(np.random.randn(n_bars) * 0.003))
+    low = close * (1 - np.abs(np.random.randn(n_bars) * 0.003))
+    open_p = close * (1 + np.random.randn(n_bars) * 0.001)
     volume = np.abs(np.random.randn(n_bars) * 100 + 500)
     bars = np.column_stack([open_p, high, low, close, volume])
 
-    # Use temp DB for test
-    test_db = str(Path(__file__).parent / "test_vdj_antibodies.db")
+    print(f"\n  V segments: {N_V} | D segments: {N_D} | J segments: {N_J}")
+    print(f"  Raw combinations: {N_V * N_D * N_J}")
+    valid = count_valid_combinations()
+    print(f"  Valid (12/23 rule): {valid}")
+    print(f"  With junctional diversity: ~{valid * 100}+")
 
-    print(f"\n  Synthetic data: {n_bars} bars (BTC-like)")
-    print(f"  V segments: {len(list(VSegmentType))} entry signals")
-    print(f"  D segments: {len(list(DSegmentType))} regime classifiers")
-    print(f"  J segments: {len(list(JSegmentType))} exit strategies")
-    print(f"  Combinatorial space: {len(list(VSegmentType)) * len(list(DSegmentType)) * len(list(JSegmentType))} base combinations")
-    print(f"  (+ junctional diversity = effectively infinite)")
+    # Fake TE activations
+    te_activations = []
+    for v_name in V_NAMES:
+        v_def = V_SEGMENTS[v_name]
+        te_activations.append({
+            "te": v_def["te_source"],
+            "strength": np.random.uniform(0.1, 0.9),
+            "direction": np.random.choice([-1, 1]),
+        })
 
-    # Initialize engine
-    engine = VDJRecombinationEngine(
-        db_path=test_db,
-        population_size=100,
-        seed=42,
+    # Test engine
+    test_db = str(Path(__file__).parent / "test_vdj_memory.db")
+    engine = VDJRecombinationEngine(memory_db_path=test_db, seed=42)
+
+    print("\n  Running VDJ cycle...")
+    result = engine.run_cycle(
+        bars=bars,
+        symbol="BTCUSD",
+        te_activations=te_activations,
+        shock_level=0.3,
+        shock_label="NORMAL",
     )
 
-    print("\n  --- STEP 1: V(D)J RECOMBINATION ---")
-    print("  Generating 100 antibodies...")
-    antibodies = engine.recombine(100)
-    print(f"  Generated {len(antibodies)} unique antibodies")
+    print(f"\n  Result:")
+    print(f"    Action:     {result['action']}")
+    print(f"    Confidence: {result['confidence']:.4f}")
+    print(f"    Lot mult:   {result['lot_mult']:.2f}")
+    print(f"    Source:      {result['source']}")
+    print(f"    Generation:  {result['generation']}")
+    print(f"    Population:  {result['population_stats']}")
+    print(f"    Elapsed:     {result.get('elapsed_seconds', 0):.1f}s")
 
-    # Show a few examples
-    print("\n  Sample antibodies:")
-    for ab in antibodies[:5]:
-        d = ab.get_direction()
-        dir_str = "LONG" if d > 0 else "SHORT"
-        print(f"    [{ab.antibody_id[:8]}] {dir_str}: "
-              f"V={ab.v_segment.segment_type.value} | "
-              f"D={ab.d_segment.segment_type.value} | "
-              f"J={ab.j_segment.segment_type.value} | "
-              f"TEs={ab.get_te_fingerprint()}")
+    # Run multiple cycles to test maturation + memory promotion
+    for cyc in range(2, 12):
+        shock = max(0.1, 0.5 - cyc * 0.05)
+        label = "CALM" if shock < 0.2 else "NORMAL"
+        r = engine.run_cycle(
+            bars=bars, symbol="BTCUSD",
+            te_activations=te_activations,
+            shock_level=shock, shock_label=label,
+        )
+        # Show top fitness for diagnostics
+        fitnesses = sorted([a.get("fitness", 0) for a in engine.active_antibodies], reverse=True)
+        top3 = fitnesses[:3] if len(fitnesses) >= 3 else fitnesses
+        mat_rounds = [a.get("maturation_rounds", 0) for a in engine.active_antibodies]
+        max_mat = max(mat_rounds) if mat_rounds else 0
+        print(f"  Cycle {cyc:2d}: {r['action']:4s} conf={r['confidence']:.3f} "
+              f"active={r['population_stats']['active']:3d} "
+              f"memory={r['population_stats']['memory']} "
+              f"top_fit=[{', '.join(f'{f:.3f}' for f in top3)}] "
+              f"max_mat_rounds={max_mat}")
 
-    print("\n  --- STEP 2: ANTIGEN TESTING (Backtest) ---")
-    antibodies = engine.evaluate_fitness(bars, antibodies)
-    active_abs = [a for a in antibodies if a.total_trades > 0]
-    print(f"  {len(active_abs)} antibodies generated trades")
-    print(f"  Best fitness: {antibodies[0].fitness:.4f}")
-    print(f"  Avg trades per antibody: {np.mean([a.total_trades for a in antibodies]):.1f}")
+    # Force-test memory promotion path by injecting a high-fitness antibody
+    print("\n  Testing memory promotion path...")
+    fake_memory = {
+        "antibody_id": "test_memory_001",
+        "v_name": V_NAMES[0], "d_name": D_NAMES[0], "j_name": J_NAMES[0],
+        "perturbed_v_params": {}, "perturbed_d_params": {}, "perturbed_j_params": {},
+        "fitness": 0.85, "posterior_wr": 0.72, "profit_factor": 2.5,
+        "sortino": 1.8, "n_trades": 40, "n_wins": 28,
+        "generation": 5, "parent_id": "", "maturation_rounds": 5,
+    }
+    promoted = engine._phase7_memory_promotion([fake_memory])
+    print(f"    Promoted: {len(promoted)} memory cells")
+    assert len(promoted) == 1, "Memory promotion failed!"
+    assert len(engine.memory_cells) >= 1, "Memory cell not stored!"
+    print(f"    Total memory cells: {len(engine.memory_cells)}")
 
-    print("\n  Top 5 antibodies after testing:")
-    for ab in antibodies[:5]:
-        print(f"    {ab.summary()}")
+    # Verify SQLite persistence
+    print("\n  SQLite verification:")
+    import sqlite3
+    with sqlite3.connect(test_db) as conn:
+        gen_rows = conn.execute("SELECT COUNT(*) FROM vdj_generations").fetchone()[0]
+        mem_rows = conn.execute("SELECT COUNT(*) FROM memory_cells").fetchone()[0]
+        print(f"    Generations logged: {gen_rows}")
+        print(f"    Memory cells stored: {mem_rows}")
+        if mem_rows > 0:
+            top = conn.execute(
+                "SELECT antibody_id, fitness, v_segment, d_segment, j_segment "
+                "FROM memory_cells ORDER BY fitness DESC LIMIT 3"
+            ).fetchall()
+            for row in top:
+                print(f"    Top memory: {row[0]} fitness={row[1]:.3f} ({row[2]}+{row[3]}+{row[4]})")
 
-    print("\n  --- STEP 3: CLONAL SELECTION ---")
-    survivors, dead = engine.clonal_selection(antibodies)
-    print(f"  Survivors: {len(survivors)}")
-    print(f"  Dead (apoptosis): {len(dead)}")
-
-    if survivors:
-        print("\n  Surviving antibodies:")
-        for ab in survivors:
-            print(f"    {ab.summary()}")
-
-    print("\n  --- STEP 4: AFFINITY MATURATION ---")
-    matured = engine.affinity_maturation(survivors, bars)
-    matured = engine.evaluate_fitness(bars, matured)
-
-    print("  Matured antibodies:")
-    for i, (orig, mat) in enumerate(zip(survivors[:len(matured)], matured)):
-        improvement = mat.fitness - orig.fitness
-        print(f"    {mat.summary()} | improvement={improvement:+.4f}")
-
-    print("\n  --- STEP 5: MEMORY B CELL FORMATION ---")
-    new_memory = engine.form_memory_cells(matured)
-    print(f"  New memory cells: {len(new_memory)}")
-    print(f"  Total memory cells: {len(engine.memory_cells)}")
-
-    if engine.memory_cells:
-        print("\n  Memory B cells (persistent winners):")
-        for mc in engine.memory_cells:
-            print(f"    {mc.summary()}")
-
-    print("\n  --- LIVE SIGNAL TEST ---")
-    consensus = engine.get_antibody_consensus(bars)
-    dir_str = "LONG" if consensus["direction"] > 0 else ("SHORT" if consensus["direction"] < 0 else "NEUTRAL")
-    print(f"  Direction:  {dir_str}")
-    print(f"  Confidence: {consensus['confidence']:.4f}")
-    print(f"  Active:     {consensus['n_active']} antibodies")
-    print(f"  Long:       {consensus['n_long']}")
-    print(f"  Short:      {consensus['n_short']}")
-
-    # Write signal file
-    bridge = VDJTEQABridge(engine)
-    bridge.write_signal_file(bars)
-    print(f"\n  Signal file written to: {bridge.signal_file}")
-
-    # Cleanup test DB
+    # Cleanup
     try:
         os.remove(test_db)
     except OSError:
         pass
 
     print("\n" + "=" * 76)
-    print("  VDJ Recombination Engine test complete.")
+    print("  VDJ v2.0 test complete.")
     print("=" * 76)

@@ -269,7 +269,7 @@ int CSignalRL_TRX_WPR::LongCondition(void)
 //--- if the model 4 is used
    if(((m_patterns_usage & 0x10) != 0) && IsPattern_4(POSITION_TYPE_BUY))
    {  _x[0] = 1.0f;
-      double _y = RunModel(0, POSITION_TYPE_BUY, _x);
+      double _y = RunModel(1, POSITION_TYPE_BUY, _x);
       if(_y > 0.0)
       {  result += m_pattern_4;
          results++;
@@ -278,7 +278,7 @@ int CSignalRL_TRX_WPR::LongCondition(void)
 //--- if the model 5 is used
    if(((m_patterns_usage & 0x20) != 0) && IsPattern_5(POSITION_TYPE_BUY))
    {  _x[0] = 1.0f;
-      double _y = RunModel(0, POSITION_TYPE_BUY, _x);
+      double _y = RunModel(2, POSITION_TYPE_BUY, _x);
       if(_y > 0.0)
       {  result += m_pattern_5;
          results++;
@@ -311,7 +311,7 @@ int CSignalRL_TRX_WPR::ShortCondition(void)
 //--- if the model 4 is used
    if(((m_patterns_usage & 0x10) != 0) && IsPattern_4(POSITION_TYPE_SELL))
    {  _x[1] = 1.0f;
-      double _y = RunModel(0, POSITION_TYPE_SELL, _x);
+      double _y = RunModel(1, POSITION_TYPE_SELL, _x);
       if(_y < 0.0)
       {  result += m_pattern_4;
          results++;
@@ -320,7 +320,7 @@ int CSignalRL_TRX_WPR::ShortCondition(void)
 //--- if the model 5 is used
    if(((m_patterns_usage & 0x20) != 0) && IsPattern_5(POSITION_TYPE_SELL))
    {  _x[1] = 1.0f;
-      double _y = RunModel(0, POSITION_TYPE_SELL, _x);
+      double _y = RunModel(2, POSITION_TYPE_SELL, _x);
       if(_y < 0.0)
       {  result += m_pattern_5;
          results++;

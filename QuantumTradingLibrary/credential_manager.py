@@ -95,6 +95,22 @@ ACCOUNT_METADATA = {
         "magic": 152001,
         "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
         "env_key": "FTMO_PASSWORD"
+    },
+    "QNIF_FTMO": {
+        "account": 1521096288,
+        "server": "FTMO-Demo2",
+        "terminal_path": r"C:\Program Files\FTMO Global Markets MT5 Terminal\terminal64.exe",
+        "magic": 152002,
+        "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
+        "env_key": "QNIF_FTMO_PASSWORD"
+    },
+    "QNIF_GL_3": {
+        "account": 107245,
+        "server": "GetLeveraged-Trade",
+        "terminal_path": None,
+        "magic": 107002,
+        "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
+        "env_key": "QNIF_GL_3_PASSWORD"
     }
 }
 

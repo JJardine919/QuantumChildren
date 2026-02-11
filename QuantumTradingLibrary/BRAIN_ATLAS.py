@@ -73,6 +73,13 @@ try:
 except ImportError:
     FEEDBACK_ENABLED = False
 
+# QNIF quantum-immune signal bridge (Hybrid Veto authority)
+try:
+    from qnif_bridge import QNIFBridge
+    QNIF_ENABLED = True
+except ImportError:
+    QNIF_ENABLED = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -368,6 +375,7 @@ class AccountTrader:
         self.expert_loader = ExpertLoader()
         self.feature_engineer = FeatureEngineer()
         self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
+        self.qnif_bridge = QNIFBridge() if QNIF_ENABLED else None
         self.feedback_poller = None
         if FEEDBACK_ENABLED and TEQA_ENABLED:
             try:
@@ -650,6 +658,17 @@ class AccountTrader:
                 confidence = final_conf
                 logging.info(f"[{self.account_key}][{symbol}] {teqa_reason}")
 
+            # Apply QNIF Hybrid Veto (has override authority over TEQA/LSTM)
+            qnif_reason = ""
+            if self.qnif_bridge is not None and action is not None:
+                legacy_action_str = action.name
+                final_action_str, final_conf, lot_mult, qnif_reason = \
+                    self.qnif_bridge.apply_hybrid_veto(legacy_action_str, confidence, symbol=symbol)
+                action_map = {'BUY': Action.BUY, 'SELL': Action.SELL, 'HOLD': Action.HOLD}
+                action = action_map.get(final_action_str, Action.HOLD)
+                confidence = final_conf
+                logging.info(f"[{self.account_key}][{symbol}] {qnif_reason}")
+
             if regime == Regime.CLEAN and action in [Action.BUY, Action.SELL]:
                 trade_executed = self.execute_trade(symbol, action, confidence)
 
@@ -660,6 +679,7 @@ class AccountTrader:
                 'confidence': confidence,
                 'trade_executed': trade_executed,
                 'teqa': teqa_reason if teqa_reason else 'disabled',
+                'qnif': qnif_reason if qnif_reason else 'disabled',
             }
 
             # Send to QuantumChildren network
@@ -739,10 +759,15 @@ class AtlasBrain:
                               f"{data['action']} ({data['confidence']:.2f}) {status}")
                         if data.get('teqa') and data['teqa'] != 'disabled':
                             print(f"      {data['teqa']}")
+                        if data.get('qnif') and data['qnif'] != 'disabled':
+                            print(f"      {data['qnif']}")
 
                     # Show TEQA status line
                     if TEQA_ENABLED and trader.teqa_bridge:
                         print(f"  {trader.teqa_bridge.get_status_line()}")
+                    # Show QNIF status line
+                    if QNIF_ENABLED and trader.qnif_bridge:
+                        print(f"  {trader.qnif_bridge.get_status_line()}")
 
                     # Show feedback loop status
                     if trader.feedback_poller:

@@ -35,6 +35,9 @@ input double   MaxDDLimit        = 9.0;              // Max Drawdown Limit %
 input bool     UseHiddenSLTP     = true;             // Hidden SL/TP (manage internally)
 input double   HiddenSLMultiple  = 2.0;              // Hidden SL = TP * this
 
+input group "=== STEALTH SETTINGS ==="
+input bool     StealthMode       = false;            // Stealth Mode (hide EA identifiers)
+
 //+------------------------------------------------------------------+
 //| GLOBAL VARIABLES                                                   |
 //+------------------------------------------------------------------+
@@ -315,8 +318,8 @@ void OpenPosition(ENUM_ORDER_TYPE type, int level)
    request.type = type;
    request.price = price;
    request.deviation = 30;
-   request.magic = MagicNumber;
-   request.comment = StringFormat("BG_L%d", level);
+   request.magic = StealthMode ? 0 : MagicNumber;
+   request.comment = StealthMode ? "" : StringFormat("BG_L%d", level);
    request.type_time = ORDER_TIME_GTC;
    request.type_filling = GetFilling();
 

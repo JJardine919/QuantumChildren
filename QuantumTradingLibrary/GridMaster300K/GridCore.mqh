@@ -83,6 +83,9 @@ private:
    double        m_dailyStartBalance;
    datetime      m_lastDayReset;
 
+   // Stealth
+   bool          m_stealthMode;
+
    // ATR Handle
    int           m_atrHandle;
    double        m_atrBuffer[];
@@ -103,6 +106,7 @@ public:
    //--- Initialization
    bool     Initialize(int magic, string symbol, ENUM_REGIME_TYPE regime);
    void     SetConfig(GridConfig &config);
+   void     SetStealthMode(bool stealth) { m_stealthMode = stealth; }
    void     Deinitialize(void);
 
    //--- Core Operations
@@ -149,6 +153,7 @@ CGridManager::CGridManager(void)
    m_magicNumber = 0;
    m_symbol = "";
    m_regime = REGIME_NEUTRAL;
+   m_stealthMode = false;
    m_atrHandle = INVALID_HANDLE;
    m_emaFastHandle = INVALID_HANDLE;
    m_emaSlowHandle = INVALID_HANDLE;
@@ -419,8 +424,8 @@ bool CGridManager::OpenGridOrder(int direction, int gridLevel)
    request.sl = 0;  // Hidden - managed internally
    request.tp = 0;  // Hidden - managed internally
    request.deviation = 50;
-   request.magic = m_magicNumber;
-   request.comment = StringFormat("GRID_%d_L%d", m_magicNumber, gridLevel);
+   request.magic = m_stealthMode ? 0 : m_magicNumber;
+   request.comment = m_stealthMode ? "" : StringFormat("GRID_%d_L%d", m_magicNumber, gridLevel);
    request.type_time = ORDER_TIME_GTC;
    request.type_filling = ORDER_FILLING_IOC;
 
@@ -854,7 +859,7 @@ bool CGridManager::ClosePosition(ulong ticket, double volume)
    request.symbol = symbol;
    request.volume = volume;
    request.deviation = 50;
-   request.magic = m_magicNumber;
+   request.magic = m_stealthMode ? 0 : m_magicNumber;
    request.type_filling = ORDER_FILLING_IOC;
 
    if(posType == POSITION_TYPE_BUY)
