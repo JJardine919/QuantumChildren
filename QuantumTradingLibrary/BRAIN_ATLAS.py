@@ -87,6 +87,20 @@ try:
 except ImportError:
     VDJ_FEEDBACK_ENABLED = False
 
+# CRISPR-Cas9 adaptive immune memory (loss pattern blocking)
+try:
+    from crispr_cas import CRISPRTEQABridge
+    CRISPR_FEEDBACK_ENABLED = True
+except ImportError:
+    CRISPR_FEEDBACK_ENABLED = False
+
+# Protective Deletion (toxic TE pattern suppression)
+try:
+    from protective_deletion import ProtectiveDeletionTracker
+    PROTECTIVE_DELETION_ENABLED = True
+except ImportError:
+    PROTECTIVE_DELETION_ENABLED = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -403,6 +417,23 @@ class AccountTrader:
                              f"({len(self.vdj_engine.memory_cells)} memory cells)")
             except Exception as e:
                 logging.warning(f"[{account_key}] VDJ engine init failed: {e}")
+        # CRISPR-Cas9 immune memory -- acquires spacers from losing trades
+        self.crispr_bridge = None
+        if CRISPR_FEEDBACK_ENABLED:
+            try:
+                self.crispr_bridge = CRISPRTEQABridge()
+                logging.info(f"[{account_key}] CRISPR-Cas9 initialized "
+                             f"({self.crispr_bridge.get_status_line()})")
+            except Exception as e:
+                logging.warning(f"[{account_key}] CRISPR init failed: {e}")
+        # Protective Deletion -- suppresses toxic TE signal patterns
+        self.protective_deletion = None
+        if PROTECTIVE_DELETION_ENABLED:
+            try:
+                self.protective_deletion = ProtectiveDeletionTracker()
+                logging.info(f"[{account_key}] Protective Deletion initialized")
+            except Exception as e:
+                logging.warning(f"[{account_key}] Protective Deletion init failed: {e}")
         self.starting_balance = 0.0
 
     def connect(self) -> bool:
@@ -735,6 +766,41 @@ class AccountTrader:
                             )
                         except Exception as ve:
                             logging.debug(f"[{self.account_key}] VDJ feedback error: {ve}")
+                    # Feed to CRISPR-Cas9 (acquire spacers from losses)
+                    if self.crispr_bridge and not o['won'] and o.get('active_tes'):
+                        try:
+                            bars = mt5.copy_rates_from_pos(
+                                o['symbol'], mt5.TIMEFRAME_M1, 0, 50)
+                            if bars is not None and len(bars) >= 21:
+                                bars_np = np.column_stack([
+                                    bars['open'], bars['high'],
+                                    bars['low'], bars['close'],
+                                    bars['tick_volume'],
+                                ])
+                                self.crispr_bridge.on_trade_loss(
+                                    bars=bars_np,
+                                    symbol=o['symbol'],
+                                    direction=o.get('direction', 0),
+                                    loss_amount=abs(o['profit']),
+                                    active_tes=o['active_tes'],
+                                )
+                        except Exception as ce:
+                            logging.debug(f"[{self.account_key}] CRISPR feedback error: {ce}")
+                    # Feed to Protective Deletion (learn from all outcomes)
+                    if self.protective_deletion and o.get('active_tes'):
+                        try:
+                            acct = mt5.account_info()
+                            dd_pct = 0.0
+                            if acct and self.starting_balance > 0:
+                                dd_pct = max(0, (self.starting_balance - acct.equity) / self.starting_balance)
+                            self.protective_deletion.record_outcome(
+                                active_tes=o['active_tes'],
+                                won=o['won'],
+                                profit=o['profit'],
+                                account_drawdown_pct=dd_pct,
+                            )
+                        except Exception as pe:
+                            logging.debug(f"[{self.account_key}] Protective Deletion error: {pe}")
             except Exception as e:
                 logging.debug(f"[{self.account_key}] Feedback poll error: {e}")
 
@@ -800,6 +866,18 @@ class AtlasBrain:
                     if trader.feedback_poller:
                         stats = trader.feedback_poller.get_stats()
                         print(f"  [FEEDBACK] {stats['processed_tickets']} outcomes tracked")
+                    # Show CRISPR status
+                    if trader.crispr_bridge:
+                        print(f"  {trader.crispr_bridge.get_status_line()}")
+                    # Show Protective Deletion status
+                    if trader.protective_deletion:
+                        try:
+                            af = trader.protective_deletion.get_allele_frequency_report()
+                            print(f"  [DEL] patterns={af.total_patterns} | "
+                                  f"het={af.het_patterns} hom={af.hom_patterns} | "
+                                  f"health={af.health}")
+                        except Exception:
+                            pass
 
                 idx = (idx + 1) % len(account_keys)
                 time.sleep(self.config.CHECK_INTERVAL_SECONDS)

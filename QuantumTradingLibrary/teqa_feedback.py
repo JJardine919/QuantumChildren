@@ -123,6 +123,7 @@ class TradeOutcomePoller:
                     "won": won,
                     "active_tes": active_tes,
                     "te_combo": "+".join(sorted(active_tes)),
+                    "direction": -1 if deal["type"] == "BUY" else 1,
                 }
                 outcomes.append(outcome)
 
