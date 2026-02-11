@@ -1,0 +1,591 @@
+{
+  "symbol": "XAUUSD",
+  "timestamp": "2026-02-11T12:19:55.415788+00:00",
+  "data_source": "Real farm trade outcomes (signal_farm_logs)",
+  "seed_antibodies": [
+    {
+      "id": "312969f6897d85e6",
+      "v": "V_momentum_slow",
+      "d": "D_trending_up",
+      "j": "J_trail_chandelier",
+      "fitness": 0.6397280701754386,
+      "source": "XAU_SEED:FARM_27_LowBarBigTP_v0"
+    },
+    {
+      "id": "a8b6225636fecb1e",
+      "v": "V_structure_sr",
+      "d": "D_breakout",
+      "j": "J_fixed_rr3",
+      "fitness": 0.6397280701754386,
+      "source": "XAU_SEED:FARM_27_LowBarBigTP_v1"
+    },
+    {
+      "id": "0cedbd9c04136338",
+      "v": "V_neural_mosaic",
+      "d": "D_accumulation",
+      "j": "J_trail_parabolic",
+      "fitness": 0.6397280701754386,
+      "source": "XAU_SEED:FARM_27_LowBarBigTP_v2"
+    },
+    {
+      "id": "8b2ca74390d6e447",
+      "v": "V_structure_sr",
+      "d": "D_ranging",
+      "j": "J_dynamic_partial",
+      "fitness": 0.5428739130434782,
+      "source": "XAU_SEED:FARM_04_GridHeavy_v0"
+    },
+    {
+      "id": "56bef943e3e7fcd3",
+      "v": "V_vol_breakout",
+      "d": "D_accumulation",
+      "j": "J_trail_atr",
+      "fitness": 0.5428739130434782,
+      "source": "XAU_SEED:FARM_04_GridHeavy_v1"
+    },
+    {
+      "id": "b2f2f7a9a7af0edc",
+      "v": "V_flow_volume",
+      "d": "D_trending_up",
+      "j": "J_fixed_rr2",
+      "fitness": 0.5428739130434782,
+      "source": "XAU_SEED:FARM_04_GridHeavy_v2"
+    },
+    {
+      "id": "a4185e6cd76163ea",
+      "v": "V_momentum_fast",
+      "d": "D_trending_up",
+      "j": "J_trail_atr",
+      "fitness": 0.46096666666666664,
+      "source": "XAU_SEED:FARM_13_MomoTrend_v0"
+    },
+    {
+      "id": "ceab1dac37b5c6fb",
+      "v": "V_momentum_slow",
+      "d": "D_breakout",
+      "j": "J_trail_chandelier",
+      "fitness": 0.46096666666666664,
+      "source": "XAU_SEED:FARM_13_MomoTrend_v1"
+    },
+    {
+      "id": "03a2febc6e54a604",
+      "v": "V_structure_rsi",
+      "d": "D_trending_down",
+      "j": "J_dynamic_partial",
+      "fitness": 0.46096666666666664,
+      "source": "XAU_SEED:FARM_13_MomoTrend_v2"
+    }
+  ],
+  "adverse_events": [
+    {
+      "time": "2026-01-30 18:35:00",
+      "date": "2026-01-30",
+      "price": 4758.67,
+      "swing_pct": 12.777617906847585,
+      "drop_from_high": 697.1199999999999,
+      "shock_label": "NORMAL",
+      "shock_score": 0.8643336043790195,
+      "active_te_count": 4,
+      "active_tes": {
+        "LINE": {
+          "strength": 0.93,
+          "signal": "price_change"
+        },
+        "VIPER_Ngaro": {
+          "strength": 0.791,
+          "signal": "atr_ratio"
+        },
+        "L1_Neuronal": {
+          "strength": 0.99,
+          "signal": "pattern_repetition"
+        },
+        "TRIM28_Silencer": {
+          "strength": 0.614,
+          "signal": "drawdown_suppressor"
+        }
+      },
+      "all_te_strengths": {
+        "BEL_Pao": 0.346,
+        "DIRS1": 0.355,
+        "Ty1_copia": 0.296,
+        "Ty3_gypsy": 0.474,
+        "Alu": 0,
+        "LINE": 0.93,
+        "VIPER_Ngaro": 0.791,
+        "Crypton": 0.486,
+        "Mutator": 0.421,
+        "L1_Neuronal": 0.99,
+        "SVA_Regulatory": 0,
+        "TRIM28_Silencer": 0.614
+      }
+    },
+    {
+      "time": "2026-02-02 06:35:00",
+      "date": "2026-02-02",
+      "price": 4454.95,
+      "swing_pct": 8.438922629507463,
+      "drop_from_high": 410.60000000000036,
+      "shock_label": "CALM",
+      "shock_score": 0.7904853059885533,
+      "active_te_count": 5,
+      "active_tes": {
+        "Ty1_copia": {
+          "strength": 0.546,
+          "signal": "rsi"
+        },
+        "LINE": {
+          "strength": 0.894,
+          "signal": "price_change"
+        },
+        "VIPER_Ngaro": {
+          "strength": 0.598,
+          "signal": "atr_ratio"
+        },
+        "L1_Neuronal": {
+          "strength": 0.989,
+          "signal": "pattern_repetition"
+        },
+        "TRIM28_Silencer": {
+          "strength": 0.624,
+          "signal": "drawdown_suppressor"
+        }
+      },
+      "all_te_strengths": {
+        "BEL_Pao": 0.38,
+        "DIRS1": 0.355,
+        "Ty1_copia": 0.546,
+        "Ty3_gypsy": 0.474,
+        "Alu": 0,
+        "LINE": 0.894,
+        "VIPER_Ngaro": 0.598,
+        "Crypton": 0.473,
+        "Mutator": 0.368,
+        "L1_Neuronal": 0.989,
+        "SVA_Regulatory": 0,
+        "TRIM28_Silencer": 0.624
+      }
+    },
+    {
+      "time": "2026-01-29 15:40:00",
+      "date": "2026-01-29",
+      "price": 5162.37,
+      "swing_pct": 7.7611252264711235,
+      "drop_from_high": 434.3699999999999,
+      "shock_label": "NORMAL",
+      "shock_score": 1.0379906749660037,
+      "active_te_count": 5,
+      "active_tes": {
+        "Ty1_copia": {
+          "strength": 0.718,
+          "signal": "rsi"
+        },
+        "LINE": {
+          "strength": 0.917,
+          "signal": "price_change"
+        },
+        "VIPER_Ngaro": {
+          "strength": 1.0,
+          "signal": "atr_ratio"
+        },
+        "L1_Neuronal": {
+          "strength": 0.992,
+          "signal": "pattern_repetition"
+        },
+        "TRIM28_Silencer": {
+          "strength": 0.668,
+          "signal": "drawdown_suppressor"
+        }
+      },
+      "all_te_strengths": {
+        "BEL_Pao": 0.22,
+        "DIRS1": 0.267,
+        "Ty1_copia": 0.718,
+        "Ty3_gypsy": 0.46,
+        "Alu": 0,
+        "LINE": 0.917,
+        "VIPER_Ngaro": 1.0,
+        "Crypton": 0.48,
+        "Mutator": 0.368,
+        "L1_Neuronal": 0.992,
+        "SVA_Regulatory": 0,
+        "TRIM28_Silencer": 0.668
+      }
+    },
+    {
+      "time": "2026-02-05 23:55:00",
+      "date": "2026-02-05",
+      "price": 4702.29,
+      "swing_pct": 6.370849718751556,
+      "drop_from_high": 319.96000000000004,
+      "shock_label": "NORMAL",
+      "shock_score": 0.876576654584923,
+      "active_te_count": 5,
+      "active_tes": {
+        "LINE": {
+          "strength": 0.565,
+          "signal": "price_change"
+        },
+        "VIPER_Ngaro": {
+          "strength": 0.815,
+          "signal": "atr_ratio"
+        },
+        "Mutator": {
+          "strength": 0.579,
+          "signal": "mutation_rate"
+        },
+        "L1_Neuronal": {
+          "strength": 0.993,
+          "signal": "pattern_repetition"
+        },
+        "TRIM28_Silencer": {
+          "strength": 0.542,
+          "signal": "drawdown_suppressor"
+        }
+      },
+      "all_te_strengths": {
+        "BEL_Pao": 0.417,
+        "DIRS1": 0.439,
+        "Ty1_copia": 0.499,
+        "Ty3_gypsy": 0.49,
+        "Alu": 0,
+        "LINE": 0.565,
+        "VIPER_Ngaro": 0.815,
+        "Crypton": 0.482,
+        "Mutator": 0.579,
+        "L1_Neuronal": 0.993,
+        "SVA_Regulatory": 0,
+        "TRIM28_Silencer": 0.542
+      }
+    },
+    {
+      "time": "2026-02-04 16:45:00",
+      "date": "2026-02-04",
+      "price": 4875.33,
+      "swing_pct": 4.230655901938827,
+      "drop_from_high": 215.3699999999999,
+      "shock_label": "CALM",
+      "shock_score": 0.7659883482758109,
+      "active_te_count": 4,
+      "active_tes": {
+        "LINE": {
+          "strength": 0.733,
+          "signal": "price_change"
+        },
+        "VIPER_Ngaro": {
+          "strength": 0.515,
+          "signal": "atr_ratio"
+        },
+        "L1_Neuronal": {
+          "strength": 0.993,
+          "signal": "pattern_repetition"
+        },
+        "TRIM28_Silencer": {
+          "strength": 0.559,
+          "signal": "drawdown_suppressor"
+        }
+      },
+      "all_te_strengths": {
+        "BEL_Pao": 0.45,
+        "DIRS1": 0.435,
+        "Ty1_copia": 0,
+        "Ty3_gypsy": 0.487,
+        "Alu": 0,
+        "LINE": 0.733,
+        "VIPER_Ngaro": 0.515,
+        "Crypton": 0.49,
+        "Mutator": 0.421,
+        "L1_Neuronal": 0.993,
+        "SVA_Regulatory": 0,
+        "TRIM28_Silencer": 0.559
+      }
+    },
+    {
+      "time": "2026-02-01 23:15:00",
+      "date": "2026-02-01",
+      "price": 4739.7,
+      "swing_pct": 3.1162167962961034,
+      "drop_from_high": 152.44999999999982,
+      "shock_label": "ELEVATED",
+      "shock_score": 1.649324471296712,
+      "active_te_count": 4,
+      "active_tes": {
+        "LINE": {
+          "strength": 0.785,
+          "signal": "price_change"
+        },
+        "VIPER_Ngaro": {
+          "strength": 1.0,
+          "signal": "atr_ratio"
+        },
+        "L1_Neuronal": {
+          "strength": 0.993,
+          "signal": "pattern_repetition"
+        },
+        "TRIM28_Silencer": {
+          "strength": 0.561,
+          "signal": "drawdown_suppressor"
+        }
+      },
+      "all_te_strengths": {
+        "BEL_Pao": 0.379,
+        "DIRS1": 0.451,
+        "Ty1_copia": 0.302,
+        "Ty3_gypsy": 0.494,
+        "Alu": 0.463,
+        "LINE": 0.785,
+        "VIPER_Ngaro": 1.0,
+        "Crypton": 0.498,
+        "Mutator": 0.421,
+        "L1_Neuronal": 0.993,
+        "SVA_Regulatory": 0,
+        "TRIM28_Silencer": 0.561
+      }
+    },
+    {
+      "time": "2026-01-21 19:40:00",
+      "date": "2026-01-21",
+      "price": 4767.16,
+      "swing_pct": 2.4322554236594383,
+      "drop_from_high": 118.84000000000015,
+      "shock_label": "ELEVATED",
+      "shock_score": 1.4421827461546675,
+      "active_te_count": 5,
+      "active_tes": {
+        "LINE": {
+          "strength": 0.57,
+          "signal": "price_change"
+        },
+        "VIPER_Ngaro": {
+          "strength": 1.0,
+          "signal": "atr_ratio"
+        },
+        "Mutator": {
+          "strength": 0.579,
+          "signal": "mutation_rate"
+        },
+        "L1_Neuronal": {
+          "strength": 0.992,
+          "signal": "pattern_repetition"
+        },
+        "TRIM28_Silencer": {
+          "strength": 0.544,
+          "signal": "drawdown_suppressor"
+        }
+      },
+      "all_te_strengths": {
+        "BEL_Pao": 0.422,
+        "DIRS1": 0.461,
+        "Ty1_copia": 0.289,
+        "Ty3_gypsy": 0.496,
+        "Alu": 0.349,
+        "LINE": 0.57,
+        "VIPER_Ngaro": 1.0,
+        "Crypton": 0.491,
+        "Mutator": 0.579,
+        "L1_Neuronal": 0.992,
+        "SVA_Regulatory": 0,
+        "TRIM28_Silencer": 0.544
+      }
+    },
+    {
+      "time": "2026-01-26 22:50:00",
+      "date": "2026-01-26",
+      "price": 4983.24,
+      "swing_pct": 2.400216225109144,
+      "drop_from_high": 122.55000000000018,
+      "shock_label": "CALM",
+      "shock_score": 0.7649294106935152,
+      "active_te_count": 5,
+      "active_tes": {
+        "LINE": {
+          "strength": 0.596,
+          "signal": "price_change"
+        },
+        "VIPER_Ngaro": {
+          "strength": 0.611,
+          "signal": "atr_ratio"
+        },
+        "Crypton": {
+          "strength": 0.501,
+          "signal": "compression"
+        },
+        "L1_Neuronal": {
+          "strength": 0.992,
+          "signal": "pattern_repetition"
+        },
+        "TRIM28_Silencer": {
+          "strength": 0.527,
+          "signal": "drawdown_suppressor"
+        }
+      },
+      "all_te_strengths": {
+        "BEL_Pao": 0.468,
+        "DIRS1": 0.467,
+        "Ty1_copia": 0.22,
+        "Ty3_gypsy": 0.494,
+        "Alu": 0,
+        "LINE": 0.596,
+        "VIPER_Ngaro": 0.611,
+        "Crypton": 0.501,
+        "Mutator": 0.211,
+        "L1_Neuronal": 0.992,
+        "SVA_Regulatory": 0,
+        "TRIM28_Silencer": 0.527
+      }
+    },
+    {
+      "time": "2026-02-03 19:05:00",
+      "date": "2026-02-03",
+      "price": 4880.18,
+      "swing_pct": 2.311802020549792,
+      "drop_from_high": 115.48999999999978,
+      "shock_label": "CALM",
+      "shock_score": 0.6540189902054006,
+      "active_te_count": 3,
+      "active_tes": {
+        "LINE": {
+          "strength": 0.595,
+          "signal": "price_change"
+        },
+        "L1_Neuronal": {
+          "strength": 0.991,
+          "signal": "pattern_repetition"
+        },
+        "TRIM28_Silencer": {
+          "strength": 0.539,
+          "signal": "drawdown_suppressor"
+        }
+      },
+      "all_te_strengths": {
+        "BEL_Pao": 0.438,
+        "DIRS1": 0.457,
+        "Ty1_copia": 0.037,
+        "Ty3_gypsy": 0.493,
+        "Alu": 0,
+        "LINE": 0.595,
+        "VIPER_Ngaro": 0.429,
+        "Crypton": 0.5,
+        "Mutator": 0.474,
+        "L1_Neuronal": 0.991,
+        "SVA_Regulatory": 0,
+        "TRIM28_Silencer": 0.539
+      }
+    },
+    {
+      "time": "2026-01-28 23:50:00",
+      "date": "2026-01-28",
+      "price": 5491.15,
+      "swing_pct": 1.7507604222580135,
+      "drop_from_high": 97.85000000000036,
+      "shock_label": "NORMAL",
+      "shock_score": 1.0930187344187239,
+      "active_te_count": 7,
+      "active_tes": {
+        "BEL_Pao": {
+          "strength": 0.539,
+          "signal": "momentum"
+        },
+        "DIRS1": {
+          "strength": 0.572,
+          "signal": "trend_strength"
+        },
+        "Ty3_gypsy": {
+          "strength": 0.513,
+          "signal": "macd"
+        },
+        "LINE": {
+          "strength": 0.58,
+          "signal": "price_change"
+        },
+        "VIPER_Ngaro": {
+          "strength": 1.0,
+          "signal": "atr_ratio"
+        },
+        "L1_Neuronal": {
+          "strength": 0.993,
+          "signal": "pattern_repetition"
+        },
+        "TRIM28_Silencer": {
+          "strength": 0.544,
+          "signal": "drawdown_suppressor"
+        }
+      },
+      "all_te_strengths": {
+        "BEL_Pao": 0.539,
+        "DIRS1": 0.572,
+        "Ty1_copia": 0,
+        "Ty3_gypsy": 0.513,
+        "Alu": 0,
+        "LINE": 0.58,
+        "VIPER_Ngaro": 1.0,
+        "Crypton": 0.481,
+        "Mutator": 0.368,
+        "L1_Neuronal": 0.993,
+        "SVA_Regulatory": 0,
+        "TRIM28_Silencer": 0.544
+      }
+    }
+  ],
+  "crispr_rules": [
+    {
+      "te_combo": [
+        "L1_Neuronal",
+        "LINE"
+      ],
+      "frequency": 10,
+      "total_events": 10,
+      "pct": 100.0,
+      "reason": "Co-active in 10/10 XAU adverse events (100%)"
+    },
+    {
+      "te_combo": [
+        "LINE",
+        "TRIM28_Silencer"
+      ],
+      "frequency": 10,
+      "total_events": 10,
+      "pct": 100.0,
+      "reason": "Co-active in 10/10 XAU adverse events (100%)"
+    },
+    {
+      "te_combo": [
+        "L1_Neuronal",
+        "TRIM28_Silencer"
+      ],
+      "frequency": 10,
+      "total_events": 10,
+      "pct": 100.0,
+      "reason": "Co-active in 10/10 XAU adverse events (100%)"
+    },
+    {
+      "te_combo": [
+        "LINE",
+        "VIPER_Ngaro"
+      ],
+      "frequency": 9,
+      "total_events": 10,
+      "pct": 90.0,
+      "reason": "Co-active in 9/10 XAU adverse events (90%)"
+    },
+    {
+      "te_combo": [
+        "L1_Neuronal",
+        "VIPER_Ngaro"
+      ],
+      "frequency": 9,
+      "total_events": 10,
+      "pct": 90.0,
+      "reason": "Co-active in 9/10 XAU adverse events (90%)"
+    },
+    {
+      "te_combo": [
+        "TRIM28_Silencer",
+        "VIPER_Ngaro"
+      ],
+      "frequency": 9,
+      "total_events": 10,
+      "pct": 90.0,
+      "reason": "Co-active in 9/10 XAU adverse events (90%)"
+    }
+  ]
+}
