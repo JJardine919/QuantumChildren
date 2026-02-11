@@ -187,8 +187,9 @@ def calculate_entropy(
     if score >= confidence_threshold:
         state = EntropyState.LOW
     else:
-        # Adjusted threshold for MEDIUM = threshold - boost, floored at 0.50 * threshold
-        adjusted = max(confidence_threshold - (compression_boost / 100.0), confidence_threshold * 0.50)
+        # MEDIUM threshold: half of confidence threshold
+        # Compression boost is already applied to final_score, so don't subtract it again
+        adjusted = confidence_threshold * 0.50
         if score >= adjusted:
             state = EntropyState.MEDIUM
         else:

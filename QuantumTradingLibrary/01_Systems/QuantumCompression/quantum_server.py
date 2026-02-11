@@ -78,19 +78,16 @@ def cost_function(params, input_state, num_qubits, num_latent):
     fid = qt.fidelity(rho_trash, ref)
     return 1 - fid
 
-# --- THE HIDDEN MECHANISM ---
-# We calculate "System Entropy" as a function of the Compression Error (Loss).
-# As the autoencoder learns to compress the market state, the "Loss" (information loss) drops.
-# We present this as "System Entropy" dropping.
-# S_hidden = k * log(1 + Loss * 10) + jitter
-def calculate_hidden_entropy(loss):
-    # Base entropy is proportional to the error in compression
-    base_entropy = np.log1p(loss * 20) / np.log1p(20) # Normalized roughly 0-1
-    
-    # Add some "quantum noise" jitter that decreases as we get closer to convergence
+# --- COMPRESSION ERROR DISPLAY ---
+# Normalized transform of autoencoder reconstruction error.
+# NOT Shannon/von Neumann entropy. This visualizes how well the
+# autoencoder is compressing the market state: lower = better compression.
+def calculate_compression_error_display(loss):
+    """Derive a 0-1 display metric from compression loss.
+    Lower values indicate better compression fidelity."""
+    base_metric = np.log1p(loss * 20) / np.log1p(20)  # Normalized 0-1
     jitter = random.normalvariate(0, 0.02 * (loss + 0.1))
-    
-    return max(0, min(1, base_entropy + jitter))
+    return max(0, min(1, base_metric + jitter))
 
 # --- MOCK DATA SOURCE ---
 def generate_market_state(size=16):
@@ -201,7 +198,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # Phase 2: Optimization (The "Hidden" Answer)
             for i in range(40):
                 current_loss = cost_function(params, input_state, num_qubits, num_latent)
-                display_entropy = calculate_hidden_entropy(current_loss)
+                display_entropy = calculate_compression_error_display(current_loss)
                 
                 # Hill climbing logic
                 new_params = params + np.random.randn(len(params)) * 0.1

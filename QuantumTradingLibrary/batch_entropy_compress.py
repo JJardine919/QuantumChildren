@@ -156,17 +156,16 @@ class EntropyAnalyzer:
         else:
             comp_ratio, layers = 1.0, 0
 
-        # Estimated performance boost from entropy removal
-        # Higher compression = cleaner patterns = better generalization
-        # ETARE-adjusted: 12% per layer (was 10%), and lower CLEAN threshold
-        estimated_boost = (comp_ratio - 1.0) * 0.12  # ~12% per compression layer
+        # Compression quality score (0-1 scale, higher = less entropy)
+        # This measures how compressible the weights are, NOT a win rate predictor.
+        compression_quality = min(1.0, (comp_ratio - 1.0) / 2.0) if comp_ratio > 1.0 else 0.0
 
         return {
             "classical_entropy": classical_ent,
             "compression_ratio": comp_ratio,
             "layers_compressed": layers,
-            "estimated_boost_pct": estimated_boost * 100,
-            "regime": "CLEAN" if comp_ratio > 1.1 else "NOISY"  # Was 1.2 - more experts qualify
+            "compression_quality": compression_quality,
+            "regime": "CLEAN" if comp_ratio > 1.1 else "NOISY"
         }
 
 
@@ -297,22 +296,21 @@ def main():
             }
             results["walkforward_experts"].append(expert_result)
 
-            # Projected performance
-            projected_wr = expert['win_rate'] + analysis['estimated_boost_pct']
+            # Real win rate from backtest (no fabricated boost)
+            actual_wr = expert['win_rate']
 
             print(f"  Entropy: {analysis['classical_entropy']:.4f} | "
                   f"Compression: {analysis['compression_ratio']:.2f}x | "
                   f"Regime: {analysis['regime']}")
-            print(f"  Original WR: {expert['win_rate']}% -> Projected: {projected_wr:.1f}%")
+            print(f"  Win Rate: {actual_wr}% (backtest) | Quality: {analysis['compression_quality']:.2f}")
 
-            # Add to master if projected 80%+
-            if projected_wr >= 80:
+            # Add to master if real WR 80%+ OR (70%+ with CLEAN regime)
+            if actual_wr >= 80 or (actual_wr >= 70 and analysis['regime'] == 'CLEAN'):
                 results["master_library"].append({
                     "source": "walkforward",
                     "filename": expert['filename'],
-                    "original_wr": expert['win_rate'],
-                    "projected_wr": projected_wr,
-                    "compression_ratio": analysis['compression_ratio'],
+                    "win_rate": actual_wr,
+                    "compression_quality": analysis['compression_quality'],
                     "regime": analysis['regime']
                 })
             print()
@@ -345,28 +343,24 @@ def main():
             }
             results["qtl_experts"].append(expert_result)
 
-            # For QTL, estimate win rate from fitness
-            # Fitness of 0.27 ~= 70% WR based on WalkForward correlation
-            estimated_wr = 50 + (expert['fitness'] * 100)  # Rough estimate
-            projected_wr = estimated_wr + analysis['estimated_boost_pct']
+            # QTL experts: fitness = ROI * win_rate^2, cannot reliably invert to win rate
+            fitness = expert['fitness']
 
             print(f"  Entropy: {analysis['classical_entropy']:.4f} | "
                   f"Compression: {analysis['compression_ratio']:.2f}x | "
                   f"Regime: {analysis['regime']}")
-            print(f"  Fitness: {expert['fitness']:.4f} | Profit: ${expert['profit']:.2f}")
-            print(f"  Est WR: {estimated_wr:.1f}% -> Projected: {projected_wr:.1f}%")
+            print(f"  Fitness: {fitness:.4f} | Profit: ${expert['profit']:.2f}")
+            print(f"  Quality: {analysis['compression_quality']:.2f}")
 
             # Add to master if clean regime and high fitness
-            if analysis['regime'] == 'CLEAN' and expert['fitness'] > 0.15:
+            if analysis['regime'] == 'CLEAN' and fitness > 0.15:
                 results["master_library"].append({
                     "source": "qtl",
                     "filename": expert['filename'],
                     "symbol": expert['symbol'],
-                    "fitness": expert['fitness'],
+                    "fitness": fitness,
                     "profit": expert['profit'],
-                    "estimated_wr": estimated_wr,
-                    "projected_wr": projected_wr,
-                    "compression_ratio": analysis['compression_ratio'],
+                    "compression_quality": analysis['compression_quality'],
                     "regime": analysis['regime']
                 })
             print()
@@ -393,19 +387,22 @@ def main():
     print(f"  Clean (low entropy): {qtl_clean}")
     print(f"  Noisy (high entropy): {len(results['qtl_experts']) - qtl_clean}")
 
-    print(f"\nMASTER LIBRARY (80%+ Projected):")
+    print(f"\nMASTER LIBRARY (Qualified Experts):")
     print(f"  Total qualified: {len(results['master_library'])}")
 
-    # Sort master library by projected win rate
-    results["master_library"].sort(key=lambda x: x.get('projected_wr', 0), reverse=True)
+    # Sort: WalkForward by win_rate, QTL by fitness
+    results["master_library"].sort(
+        key=lambda x: x.get('win_rate', 0) if x['source'] == 'walkforward' else x.get('fitness', 0) * 100,
+        reverse=True
+    )
 
     print("\n  TOP 10 FOR INSTANT CHALLENGES:")
     print("  " + "-" * 60)
     for i, expert in enumerate(results["master_library"][:10], 1):
         if expert['source'] == 'walkforward':
-            print(f"  {i}. {expert['filename']} - WR: {expert['original_wr']}% -> {expert['projected_wr']:.1f}%")
+            print(f"  {i}. {expert['filename']} - WR: {expert['win_rate']}% | Quality: {expert['compression_quality']:.2f}")
         else:
-            print(f"  {i}. {expert['filename']} - Fit: {expert['fitness']:.3f} -> {expert['projected_wr']:.1f}%")
+            print(f"  {i}. {expert['filename']} - Fitness: {expert['fitness']:.3f} | Quality: {expert['compression_quality']:.2f}")
 
     # Save report
     report_path = output_dir / "compression_report.json"
@@ -422,12 +419,11 @@ def main():
         print(f"  Expert: {safest['filename']}")
         print(f"  Source: {safest['source'].upper()}")
         if safest['source'] == 'walkforward':
-            print(f"  Original Win Rate: {safest['original_wr']}%")
+            print(f"  Win Rate: {safest['win_rate']}% (backtest verified)")
         else:
             print(f"  Fitness: {safest['fitness']:.4f}")
             print(f"  Symbol: {safest['symbol']}")
-        print(f"  Projected Win Rate: {safest['projected_wr']:.1f}%")
-        print(f"  Compression Ratio: {safest['compression_ratio']:.2f}x")
+        print(f"  Compression Quality: {safest['compression_quality']:.2f}")
         print(f"  Regime: {safest['regime']} (LOW ENTROPY - CLEAN)")
 
     return results

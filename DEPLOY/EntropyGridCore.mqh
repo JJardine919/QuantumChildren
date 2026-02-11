@@ -471,9 +471,10 @@ ENUM_ENTROPY_STATE CEntropyGridManager::CalculateEntropy(void)
 {
    double confidence = GetEntropyConfidence();
 
-   // Apply compression boost (+12)
-   double adjustedThreshold = m_confidenceThreshold - (m_compressionBoost / 100.0);
-   adjustedThreshold = MathMax(adjustedThreshold, 0.50); // Don't go below 50%
+   // MEDIUM threshold: half of confidence threshold
+   // Compression boost is already applied to the confidence score in GetEntropyConfidence(),
+   // so we do NOT subtract it from the threshold again (that was double-counting).
+   double adjustedThreshold = m_confidenceThreshold * 0.50;
 
    if(confidence >= m_confidenceThreshold)
       return ENTROPY_LOW;    // Highly predictable - full trading

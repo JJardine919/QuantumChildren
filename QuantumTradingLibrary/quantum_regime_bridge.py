@@ -345,7 +345,13 @@ def _write_back_to_archiver(symbol: str, qutip_result: dict, config: dict):
 # ============================================================
 
 def _tier3_zlib(prices: np.ndarray, config: dict) -> Tuple[Regime, float]:
-    """Tier 3: zlib fallback - identical to current BRAIN script behavior."""
+    """Tier 3: zlib fallback - byte compression ratio as regime proxy.
+
+    NOTE: zlib measures byte-level redundancy, which is a weak proxy for
+    market structure. High compression = repetitive prices (trending),
+    low compression = noisy prices (choppy). Fidelity scores are reduced
+    to reflect this lower confidence compared to quantum analysis.
+    """
     data_bytes = prices.astype(np.float32).tobytes()
     compressed = zlib.compress(data_bytes, level=9)
     ratio = len(data_bytes) / len(compressed)
@@ -355,16 +361,16 @@ def _tier3_zlib(prices: np.ndarray, config: dict) -> Tuple[Regime, float]:
 
     if ratio >= clean_thresh:
         regime = Regime.CLEAN
-        fidelity = 0.96
+        fidelity = 0.70  # Reduced from 0.96 - zlib is a weak proxy
     elif ratio >= volatile_thresh:
         regime = Regime.VOLATILE
-        fidelity = 0.88
+        fidelity = 0.60  # Reduced from 0.88
     else:
         regime = Regime.CHOPPY
-        fidelity = 0.75
+        fidelity = 0.50  # Reduced from 0.75
 
     log.warning(f"QUANTUM BRIDGE [TIER 3 - ZLIB FALLBACK]: {regime.value} "
-                f"(ratio={ratio:.3f}) - quantum data not available")
+                f"(ratio={ratio:.3f}) - quantum data not available, low-confidence proxy")
     return regime, fidelity
 
 

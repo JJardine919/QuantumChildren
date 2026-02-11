@@ -100,6 +100,7 @@ class TradingIndividual:
         self.criterion = nn.CrossEntropyLoss()
         
         self.fitness = 0.0
+        self.win_rate = 0.0
         self.total_profit = 0.0
         self.max_drawdown = 0.0
         self.trade_history = []
@@ -608,7 +609,7 @@ class ETARE_System:
                     individual.fitness = roi
                     
                 individual.total_profit = final_value - deposit
-                # Store winrate for debug/logging if needed (not in class yet, but fitness is key)
+                individual.win_rate = win_rate
 
     def evolve_population(self):
         self.population.sort(key=lambda x: x.fitness, reverse=True)
