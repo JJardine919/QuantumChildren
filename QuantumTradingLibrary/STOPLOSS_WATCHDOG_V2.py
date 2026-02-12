@@ -36,6 +36,9 @@ import MetaTrader5 as mt5
 # Add parent directory for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Process lock to prevent duplicate watchdog instances
+from process_lock import ProcessLock
+
 # Load config
 try:
     from config_loader import MAX_LOSS_DOLLARS, AGENT_SL_MAX, ACCOUNTS
@@ -747,14 +750,40 @@ Examples:
             print(f"Available: {list(ACCOUNTS.keys())}")
         sys.exit(1)
 
-    watchdog = StopLossWatchdogV2(
-        account_config=account_config,
-        loss_limit=args.limit,
-        max_drawdown=args.drawdown,
-        force_sl=force_sl,
-        emergency_sl_dollars=args.emergency_sl_dollars,
-    )
-    watchdog.run(check_interval=args.interval)
+    # CRITICAL: Acquire process lock to prevent duplicate watchdog instances
+    lock = ProcessLock(f"WATCHDOG_{args.account}", account=str(account_config.get('account')))
+
+    try:
+        with lock:
+            print("=" * 60)
+            print(f"WATCHDOG_{args.account} - PROCESS LOCK ACQUIRED")
+            print("=" * 60)
+
+            watchdog = StopLossWatchdogV2(
+                account_config=account_config,
+                loss_limit=args.limit,
+                max_drawdown=args.drawdown,
+                force_sl=force_sl,
+                emergency_sl_dollars=args.emergency_sl_dollars,
+            )
+            watchdog.run(check_interval=args.interval)
+
+    except RuntimeError as e:
+        print("=" * 60)
+        print("WATCHDOG PROCESS LOCK FAILURE")
+        print("=" * 60)
+        print(str(e))
+        print("")
+        print(f"Another watchdog for {args.account} is already running.")
+        print("This prevents duplicate monitoring of the same account.")
+        print("")
+        print("To stop all processes safely:")
+        print("  Run: SAFE_SHUTDOWN.bat")
+        print("")
+        print("To check running processes:")
+        print("  Run: python process_lock.py --list")
+        print("=" * 60)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

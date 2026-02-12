@@ -10,6 +10,10 @@ import qutip as qt
 from scipy.optimize import minimize
 import random
 import os
+import sys
+
+# Process lock to prevent multiple server instances
+from process_lock import ProcessLock
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO)
@@ -243,5 +247,30 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close()
 
 if __name__ == "__main__":
-    # Listen on 0.0.0.0 to expose the interface to the internet (VPS mode)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # CRITICAL: Acquire process lock to prevent multiple server instances
+    lock = ProcessLock("quantum_server")
+
+    try:
+        with lock:
+            logger.info("=" * 60)
+            logger.info("QUANTUM SERVER - PROCESS LOCK ACQUIRED")
+            logger.info("=" * 60)
+
+            # Listen on 0.0.0.0 to expose the interface to the internet (VPS mode)
+            uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    except RuntimeError as e:
+        logger.error("=" * 60)
+        logger.error("QUANTUM SERVER LOCK FAILURE")
+        logger.error("=" * 60)
+        logger.error(str(e))
+        logger.error("")
+        logger.error("Another quantum_server instance is already running.")
+        logger.error("")
+        logger.error("To stop all processes safely:")
+        logger.error("  Run: SAFE_SHUTDOWN.bat")
+        logger.error("")
+        logger.error("To check running processes:")
+        logger.error("  Run: python process_lock.py --list")
+        logger.error("=" * 60)
+        sys.exit(1)

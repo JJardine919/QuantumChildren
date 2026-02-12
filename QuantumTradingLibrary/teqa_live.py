@@ -217,6 +217,19 @@ def build_signal_json(result: dict) -> dict:
         # --- v3.1 evolution fields ---
         "evolution": result.get("evolution", {"enabled": False}),
 
+        # --- v3.2 HGH hormone fields ---
+        "hgh_hormone": result.get("hgh", {
+            "active": False,
+            "growth_signal": 0.0,
+            "variant": "none",
+            "hyperplasia": False,
+            "second_lot_ratio": 0.0,
+            "hypertrophy_boost": 0.0,
+            "helices": [],
+            "rotations_applied": 0,
+            "suppression": "",
+        }),
+
         "timestamp": result.get("timestamp", datetime.now().isoformat()),
         "version": result.get("version", "TEQA-3.0-NEURAL-TE"),
         "symbol": result.get("symbol", "UNKNOWN"),

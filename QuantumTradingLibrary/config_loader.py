@@ -80,6 +80,43 @@ DD_RESET_HOUR_UTC = _DD_PROTECTION.get('RESET_HOUR_UTC', 0)
 DD_INCLUDE_UNREALIZED = _DD_PROTECTION.get('INCLUDE_UNREALIZED_PNL', False)
 
 # ============================================================
+# REST SCHEDULE - FROM MASTER_CONFIG.json
+# ============================================================
+
+_REST_SCHEDULE = _CONFIG.get('REST_SCHEDULE', {})
+REST_SCHEDULE_ENABLED = _REST_SCHEDULE.get('ENABLED', False)
+REST_FOREX_WINDOWS = _REST_SCHEDULE.get('FOREX_WINDOWS', [])
+REST_CRYPTO_WINDOWS = _REST_SCHEDULE.get('CRYPTO_WINDOWS', [])
+REST_PERSIST_ON_REST = _REST_SCHEDULE.get('PERSIST_STATE_ON_REST', True)
+REST_PERSIST_ON_TRADE_CLOSE = _REST_SCHEDULE.get('PERSIST_ON_TRADE_CLOSE', True)
+REST_PERIODIC_SAVE_MINUTES = _REST_SCHEDULE.get('PERIODIC_SAVE_MINUTES', 30)
+
+# ============================================================
+# ASSET CLASSES - FROM MASTER_CONFIG.json
+# ============================================================
+
+ASSET_CLASSES = _CONFIG.get('ASSET_CLASSES', {})
+
+def get_asset_class(symbol: str) -> str:
+    """Get asset class for a symbol (crypto or forex). Defaults to forex."""
+    return ASSET_CLASSES.get(symbol, 'forex')
+
+# ============================================================
+# FTMO LIMITS - FROM MASTER_CONFIG.json
+# ============================================================
+
+_FTMO_LIMITS = _CONFIG.get('FTMO_LIMITS', {})
+FTMO_DAILY_DD_PCT = _FTMO_LIMITS.get('DAILY_DD_PCT', 5.0)
+FTMO_TOTAL_DD_PCT = _FTMO_LIMITS.get('TOTAL_DD_PCT', 10.0)
+FTMO_PROFIT_TARGET_PCT = _FTMO_LIMITS.get('PROFIT_TARGET_PCT', 10.0)
+FTMO_MIN_TRADING_DAYS = _FTMO_LIMITS.get('MIN_TRADING_DAYS', 4)
+FTMO_INCLUDE_UNREALIZED = _FTMO_LIMITS.get('INCLUDE_UNREALIZED_PNL', True)
+FTMO_CLOSE_BEFORE_WEEKEND = _FTMO_LIMITS.get('CLOSE_BEFORE_WEEKEND', True)
+FTMO_TRADE_STAGGER = _FTMO_LIMITS.get('TRADE_STAGGER_SECONDS', [30, 120])
+FTMO_CHALLENGE_PROFILE = _FTMO_LIMITS.get('CHALLENGE_PROFILE', {})
+FTMO_FUNDED_PROFILE = _FTMO_LIMITS.get('FUNDED_PROFILE', {})
+
+# ============================================================
 # REGIME DETECTION - FROM MASTER_CONFIG.json
 # ============================================================
 

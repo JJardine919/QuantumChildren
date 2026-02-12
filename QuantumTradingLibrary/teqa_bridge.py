@@ -98,6 +98,17 @@ class TEQASignal:
     evolution_unique_genomes: int = 0
     evolution_speciation_pressure: bool = False
 
+    # --- v3.2 Growth Amplifier fields ---
+    growth_active: bool = False
+    growth_signal: float = 0.0
+    growth_variant: str = "none"
+    growth_hyperplasia: bool = False
+    growth_second_lot_ratio: float = 0.0
+    growth_hypertrophy_boost: float = 0.0
+    growth_helices: list = field(default_factory=list)
+    growth_lipolysis_factor: float = 1.0
+    growth_suppression: str = ""
+
     @property
     def is_v3(self) -> bool:
         """Whether this signal came from TEQA v3.0."""
@@ -243,6 +254,7 @@ class TEQABridge:
             gates = data.get('gates', {})
             te_summary = data.get('te_summary', {})
             evolution = data.get('evolution', {})
+            growth = data.get('hgh_hormone', {})
 
             signal = TEQASignal(
                 # v2.0 fields
@@ -292,6 +304,17 @@ class TEQABridge:
                 evolution_best_accuracy=evolution.get('best_accuracy', 0.5),
                 evolution_unique_genomes=evolution.get('unique_genomes', 0),
                 evolution_speciation_pressure=evolution.get('speciation_pressure', False),
+
+                # v3.2 growth amplifier fields
+                growth_active=growth.get('active', False),
+                growth_signal=growth.get('growth_signal', 0.0),
+                growth_variant=growth.get('variant', 'none'),
+                growth_hyperplasia=growth.get('hyperplasia', False),
+                growth_second_lot_ratio=growth.get('second_lot_ratio', 0.0),
+                growth_hypertrophy_boost=growth.get('hypertrophy_boost', 0.0),
+                growth_helices=growth.get('helices', []),
+                growth_lipolysis_factor=growth.get('lipolysis', {}).get('sl_tighten_factor', 1.0),
+                growth_suppression=growth.get('suppression', ''),
             )
 
             self._signal_cache[cache_key] = (signal, current_mtime)
@@ -390,12 +413,19 @@ class TEQABridge:
                 evo_str = (f" | evo=gen{signal.evolution_generation} "
                            f"acc={signal.evolution_avg_accuracy:.0%} "
                            f"uniq={signal.evolution_unique_genomes}")
+            growth_str = ""
+            if signal.growth_active:
+                growth_str = (f" | growth={signal.growth_signal:.3f}"
+                              f" hyper={'YES' if signal.growth_hyperplasia else 'no'}"
+                              f" boost=+{signal.growth_hypertrophy_boost:.3f}")
+            elif signal.growth_suppression:
+                growth_str = f" | growth=OFF({signal.growth_suppression})"
             return (f"[TEQA v3] {signal.direction_str} {signal.confidence:.1%} "
                     f"| neurons={signal.n_neurons} consensus={signal.consensus_score:.0%} "
                     f"| shock={signal.shock_label} "
                     f"| lot={signal.lot_scale:.1f}x "
                     f"| TEs: I={signal.n_active_class_i} II={signal.n_active_class_ii} N={signal.n_active_neural}"
-                    f"{evo_str}")
+                    f"{evo_str}{growth_str}")
 
         return (f"[TEQA] {signal.direction_str} {signal.confidence:.1%} "
                 f"| lot={signal.lot_scale:.1f}x | novelty={signal.novelty:.2f} "

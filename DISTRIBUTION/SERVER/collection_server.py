@@ -18,12 +18,15 @@ import sqlite3
 import hashlib
 import time
 import subprocess
+import threading
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from functools import wraps
 from collections import defaultdict
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import requests as http_requests  # renamed to avoid clash with flask.request
 
 app = Flask(__name__)
 # Allow cross-origin requests from the website only
@@ -32,6 +35,44 @@ CORS(app, resources={r"/*": {"origins": [
     "http://quantum-children.com",
     "http://localhost:3000"  # Local development
 ]}})
+
+# ============================================================
+# BASE44 WEBHOOK FORWARDING
+# ============================================================
+
+BASE44_WEBHOOK_URL = os.environ.get('BASE44_WEBHOOK_URL', '')   # e.g. https://app--your-app.base44.app/api/apps/APP_ID/functions
+BASE44_WEBHOOK_KEY = os.environ.get('BASE44_WEBHOOK_KEY', '')   # same key stored in Base44 Secrets as QC_WEBHOOK_KEY
+
+log = logging.getLogger('collection_server')
+
+def _forward_to_base44(endpoint: str, payload: dict):
+    """Fire-and-forget forward to Base44 webhook. Runs in a background thread so
+    it never slows down the response to the collecting node."""
+    if not BASE44_WEBHOOK_URL or not BASE44_WEBHOOK_KEY:
+        return  # not configured yet — skip silently
+
+    url = f"{BASE44_WEBHOOK_URL.rstrip('/')}/{endpoint}"
+
+    def _send():
+        try:
+            resp = http_requests.post(
+                url,
+                json=payload,
+                headers={
+                    'Content-Type': 'application/json',
+                    'X-QC-API-Key': BASE44_WEBHOOK_KEY,
+                },
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                log.info("Forwarded to Base44 %s: OK", endpoint)
+            else:
+                log.warning("Base44 %s returned %s: %s", endpoint, resp.status_code, resp.text[:200])
+        except Exception as e:
+            log.warning("Base44 forward failed (%s): %s", endpoint, e)
+
+    threading.Thread(target=_send, daemon=True).start()
+
 
 # ============================================================
 # SECURITY & RATE LIMITING
@@ -88,6 +129,7 @@ DB_PATH = Path("quantum_collected.db")
 def init_db():
     """Initialize the collection database"""
     conn = sqlite3.connect(DB_PATH)
+    conn.execute('PRAGMA journal_mode=WAL')  # Fix audit #7: WAL mode for concurrent access
     c = conn.cursor()
 
     # Signals table
@@ -252,10 +294,22 @@ def collect_signal():
 
         update_node_stats(node_id, signal=1)
 
+        # Forward to Base44 dashboard
+        _forward_to_base44('ingestSignal', {
+            'node_id': node_id,
+            'symbol': symbol,
+            'direction': direction,
+            'confidence': confidence,
+            'quantum_entropy': data.get('quantum_entropy'),
+            'dominant_state': data.get('dominant_state'),
+            'price_at_signal': data.get('price'),
+            'timestamp': data.get('timestamp'),
+        })
+
         return jsonify({'status': 'ok', 'received': 'signal'})
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/outcome', methods=['POST'])
 @rate_limit()
@@ -291,10 +345,20 @@ def collect_outcome():
 
         update_node_stats(node_id, outcome=1)
 
+        # Forward to Base44 dashboard
+        _forward_to_base44('ingestOutcome', {
+            'node_id': node_id,
+            'ticket': data.get('ticket'),
+            'symbol': data.get('symbol'),
+            'outcome': data.get('outcome'),
+            'pnl': data.get('pnl'),
+            'timestamp': data.get('timestamp'),
+        })
+
         return jsonify({'status': 'ok', 'received': 'outcome'})
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/entropy', methods=['POST'])
 @rate_limit()
@@ -336,7 +400,8 @@ def collect_entropy():
         return jsonify({'status': 'ok', 'received': 'entropy'})
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        log.exception("Entropy collection failed")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/stats', methods=['GET'])
 @rate_limit()
@@ -374,7 +439,8 @@ def get_stats():
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        log.exception("Stats query failed")
+        return jsonify({'error': 'Internal server error'}), 500
 
 # ============================================================
 # BRIDGE API (for Base44 web dashboard)
@@ -452,7 +518,8 @@ def get_performance():
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        log.exception("Performance query failed")
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/alerts', methods=['GET'])
@@ -536,7 +603,8 @@ def get_alerts():
         return jsonify({'alerts': alerts, 'count': len(alerts)})
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        log.exception("Alerts query failed")
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/backtest', methods=['POST'])
@@ -603,7 +671,8 @@ def trigger_backtest():
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        log.exception("Backtest failed")
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/compile', methods=['POST'])
@@ -651,7 +720,8 @@ def trigger_compile():
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        log.exception("Compile queue failed")
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/compile/<int:request_id>', methods=['GET'])
@@ -681,7 +751,8 @@ def get_compile_status(request_id):
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        log.exception("Compile status query failed")
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/', methods=['GET'])

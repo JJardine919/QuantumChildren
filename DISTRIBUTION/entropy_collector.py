@@ -20,8 +20,9 @@ from pathlib import Path
 # ============================================================
 
 # QuantumChildren Collection Server
-# Load server URL from config if available, otherwise use default
+# Load server URL and collection toggle from config if available
 _DEFAULT_SERVER = "http://203.161.61.61:8888"
+COLLECTION_ENABLED = True  # Set to False in config.json to disable sending to server
 try:
     import json as _json
     _config_path = Path(__file__).parent / "config.json"
@@ -29,6 +30,7 @@ try:
         with open(_config_path) as _f:
             _cfg = _json.load(_f)
             _DEFAULT_SERVER = _cfg.get("collection_server", _DEFAULT_SERVER)
+            COLLECTION_ENABLED = _cfg.get("collection_enabled", True)
 except Exception:
     pass
 COLLECTION_SERVER = _DEFAULT_SERVER
@@ -174,7 +176,9 @@ def _save_local(data: dict, category: str):
 
 
 def _send_to_server(data: dict, endpoint: str) -> bool:
-    """Send data to collection server"""
+    """Send data to collection server. Respects COLLECTION_ENABLED toggle."""
+    if not COLLECTION_ENABLED:
+        return False  # Opt-out: data saved locally only
     try:
         url = COLLECTION_SERVER.rstrip('/') + endpoint
         response = requests.post(

@@ -25,6 +25,9 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
+# Process lock manager for duplicate detection
+from process_lock import ProcessLock, list_active_locks, LOCK_DIR
+
 # ---------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------
@@ -195,6 +198,34 @@ class Orchestrator:
 
     def setup_processes(self):
         """Create managed processes for all components."""
+        # CRITICAL: Check for existing locks BEFORE starting anything
+        existing_locks = list_active_locks()
+        if existing_locks:
+            log.error("=" * 60)
+            log.error("CANNOT START: Existing process locks detected")
+            log.error("=" * 60)
+            for filename, data in existing_locks:
+                if data:
+                    log.error(f"  {filename}:")
+                    log.error(f"    PID: {data.get('pid')}")
+                    log.error(f"    Account: {data.get('account', 'N/A')}")
+                    log.error(f"    Started: {data.get('timestamp')}")
+                else:
+                    log.error(f"  {filename}: [CORRUPT LOCK]")
+            log.error("")
+            log.error("Other trading processes are already running.")
+            log.error("")
+            log.error("To stop all processes safely:")
+            log.error("  Run: SAFE_SHUTDOWN.bat")
+            log.error("")
+            log.error("To list running processes:")
+            log.error("  Run: python process_lock.py --list")
+            log.error("")
+            log.error("To clear stale locks only:")
+            log.error("  Run: python process_lock.py --clear-stale")
+            log.error("=" * 60)
+            sys.exit(1)
+
         cwd = str(BASE_DIR)
 
         # 1. Quantum compression server

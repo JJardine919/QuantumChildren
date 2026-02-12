@@ -10,7 +10,7 @@
         "DYNAMIC_TP_PERCENT": 50,
         "SET_DYNAMIC_TP": true,
         "ROLLING_SL_ENABLED": true,
-        "CONFIDENCE_THRESHOLD": 0.22,
+        "CONFIDENCE_THRESHOLD": 0.70,
         "AGENT_SL_MIN": 0.50,
         "AGENT_SL_MAX": 1.00,
         "WATCHDOG_LIMIT": 1.00,
@@ -63,7 +63,7 @@
             "server": "AtlasFunded-Server",
             "terminal_path": "C:\\Program Files\\Atlas Funded MT5 Terminal\\terminal64.exe",
             "magic": 212001,
-            "symbols": ["BTCUSD", "ETHUSD"],
+            "symbols": ["ETHUSD"],
             "enabled": true
         },
         "GL_1": {
@@ -109,6 +109,48 @@
         "CRITICAL_DOPAMINE_MULT": 0.05,
         "RESET_HOUR_UTC": 0,
         "INCLUDE_UNREALIZED_PNL": false
+    },
+
+    "REST_SCHEDULE": {
+        "ENABLED": false,
+        "FOREX_WINDOWS": [
+            {"day": "daily", "start": "21:00", "end": "22:00", "tz": "UTC"},
+            {"day": "saturday", "start": "00:00", "end": "23:59", "tz": "UTC"},
+            {"day": "sunday", "start": "00:00", "end": "20:00", "tz": "UTC"}
+        ],
+        "CRYPTO_WINDOWS": [
+            {"day": "saturday", "start": "04:00", "end": "12:00", "tz": "UTC"}
+        ],
+        "PERSIST_STATE_ON_REST": true,
+        "PERSIST_ON_TRADE_CLOSE": true,
+        "PERIODIC_SAVE_MINUTES": 30
+    },
+
+    "FTMO_LIMITS": {
+        "DAILY_DD_PCT": 5.0,
+        "TOTAL_DD_PCT": 10.0,
+        "PROFIT_TARGET_PCT": 10.0,
+        "MIN_TRADING_DAYS": 4,
+        "INCLUDE_UNREALIZED_PNL": true,
+        "CLOSE_BEFORE_WEEKEND": true,
+        "TRADE_STAGGER_SECONDS": [30, 120],
+        "CHALLENGE_PROFILE": {
+            "MAX_LOSS_DOLLARS": 1.50,
+            "CONFIDENCE_THRESHOLD": 0.18
+        },
+        "FUNDED_PROFILE": {
+            "MAX_LOSS_DOLLARS": 1.00,
+            "CONFIDENCE_THRESHOLD": 0.22
+        }
+    },
+
+    "ASSET_CLASSES": {
+        "BTCUSD": "crypto",
+        "ETHUSD": "crypto",
+        "XAUUSD": "forex",
+        "EURUSD": "forex",
+        "GBPUSD": "forex",
+        "EURCAD": "forex"
     },
 
     "COLLECTION_SERVER": {

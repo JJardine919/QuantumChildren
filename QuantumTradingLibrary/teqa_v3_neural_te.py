@@ -1468,6 +1468,17 @@ class TEQAv3Engine:
         self.n_neurons = n_neurons
         self.shots = shots
 
+        # HGH Hormone Engine (somatotropic signal amplification)
+        self.hgh_hormone = None
+        try:
+            from hgh_hormone import HGHHormoneEngine
+            self.hgh_hormone = HGHHormoneEngine(db_path=db_path)
+            log.info("HGH Hormone Engine ENABLED")
+        except ImportError:
+            log.info("hgh_hormone.py not found -- HGH amplification disabled")
+        except Exception as e:
+            log.warning("Failed to init HGH Hormone Engine: %s", e)
+
         # Neural Mosaic Evolution (Darwinian selection on circuit topology)
         self.evolution = None
         if enable_evolution:
@@ -1546,6 +1557,22 @@ class TEQAv3Engine:
             corr = 0.0
             relationship = "NO_DONOR"
 
+        # === Step 4B: HGH Hormone Cycle ===
+        # Run BEFORE quantum execution so the hormone can inject rotations
+        # into each neuron's circuits. Synthesizes 4-helix bundle from top
+        # domesticated TEs, validates disulfide bridges, attempts receptor
+        # dimerization, runs JAK2/STAT cascade.
+        hgh_result = None
+        if self.hgh_hormone is not None:
+            try:
+                hgh_result = self.hgh_hormone.run_cycle(
+                    bars=bars,
+                    symbol=symbol,
+                    te_activations=adjusted_activations,
+                )
+            except Exception as e:
+                log.warning("HGH Hormone cycle failed: %s", e)
+
         # === Step 5: Neural Mosaic Quantum Execution (Split Architecture) ===
         # Each neuron runs two circuits:
         #   Circuit A: 25-qubit genome (original TEs)
@@ -1580,6 +1607,17 @@ class TEQAv3Engine:
                 neuron_acts, neuron=neuron, shock_level=shock_score,
                 genome_signal=genome_signal
             )
+
+            # HGH IGF-1 Bridge: inject hormone rotations into this neuron's circuits
+            if hgh_result is not None and hgh_result.active and self.hgh_hormone is not None:
+                try:
+                    n_rot = self.hgh_hormone.inject_rotations(hgh_result, genome_qc, neural_qc)
+                    if n_rot > 0:
+                        hgh_result.quantum_rotations_applied += n_rot
+                except Exception as e:
+                    log.debug("HGH quantum injection failed for neuron %s: %s",
+                              neuron.neuron_id, e)
+
             if neural_qc is not None:
                 neural_result = self.quantum.execute_circuit(
                     neural_qc, shots=neural_shots, n_qubits=N_QUBITS_NEURAL
@@ -1645,6 +1683,11 @@ class TEQAv3Engine:
 
         # Confidence: blend of concordance, consensus, and domestication
         raw_confidence = concordance * 0.3 + consensus_score * 0.3 + min(0.4, (domestication_boost - 1.0))
+
+        # HGH Hypertrophy Boost: amplify confidence when hormone is active
+        if hgh_result is not None and hgh_result.active:
+            raw_confidence += hgh_result.hypertrophy_boost
+
         confidence = float(np.clip(raw_confidence, 0.0, 1.0))
 
         # Apply quantum novelty adjustment
@@ -1719,6 +1762,28 @@ class TEQAv3Engine:
                 "G8_genomic_shock": shock_label not in ["EXTREME"],
                 "G9_speciation": relationship != "HYBRID_ZONE",
                 "G10_domestication": domestication_boost >= 1.0,
+            },
+
+            # HGH Hormone (Somatotropic Signal Amplification)
+            "hgh": {
+                "active": hgh_result.active if hgh_result else False,
+                "growth_signal": round(hgh_result.growth_signal, 6) if hgh_result else 0.0,
+                "variant": hgh_result.molecule.variant if hgh_result and hgh_result.molecule else "none",
+                "potency": hgh_result.molecule.potency if hgh_result and hgh_result.molecule else 0.0,
+                "bridge_1_intact": hgh_result.molecule.bridge_1_intact if hgh_result and hgh_result.molecule else False,
+                "bridge_2_intact": hgh_result.molecule.bridge_2_intact if hgh_result and hgh_result.molecule else False,
+                "binding_strength": hgh_result.binding.binding_strength if hgh_result and hgh_result.binding else 0.0,
+                "jak2": round(hgh_result.cascade.jak2_phosphorylation, 4) if hgh_result and hgh_result.cascade else 0.0,
+                "stat_docking": round(hgh_result.cascade.stat_docking, 4) if hgh_result and hgh_result.cascade else 0.0,
+                "hyperplasia": hgh_result.hyperplasia if hgh_result else False,
+                "second_lot_ratio": round(hgh_result.second_lot_ratio, 3) if hgh_result else 0.0,
+                "hypertrophy_boost": round(hgh_result.hypertrophy_boost, 4) if hgh_result else 0.0,
+                "helices": hgh_result.helices_used if hgh_result else [],
+                "rotations_applied": hgh_result.quantum_rotations_applied if hgh_result else 0,
+                "suppression": hgh_result.suppression_reason if hgh_result else "",
+                "lipolysis": {
+                    "sl_tighten_factor": round(hgh_result.lipolysis_factor, 4) if hgh_result else 1.0,
+                },
             },
 
             # Detailed data for analytics

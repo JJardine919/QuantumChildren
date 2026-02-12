@@ -52,13 +52,28 @@ from config_loader import (
     REQUIRE_TRAINED_EXPERT,
     LSTM_MAX_AGE_DAYS,
     get_symbol_risk,
+    REST_SCHEDULE_ENABLED,
+    REST_FOREX_WINDOWS,
+    REST_CRYPTO_WINDOWS,
+    REST_PERSIST_ON_TRADE_CLOSE,
+    get_asset_class,
 )
 
 # Import credentials securely - passwords from .env file
 from credential_manager import get_credentials, CredentialError
 
+# Process lock to prevent duplicate launches
+from process_lock import ProcessLock
+
 # Pre-launch validation
 from prelaunch_validator import validate_prelaunch
+
+# State persistence — save/restore ephemeral state across restarts
+try:
+    from state_persistence import StatePersistence
+    STATE_PERSISTENCE_ENABLED = True
+except ImportError:
+    STATE_PERSISTENCE_ENABLED = False
 
 # TEQA quantum signal bridge
 try:
@@ -596,6 +611,75 @@ class AccountTrader:
                     return True
         return False
 
+    def _apply_lipolysis(self, symbol: str, tighten_factor: float):
+        """Tighten SL on losing positions (growth amplifier lipolysis).
+
+        Only tightens, never loosens. Respects AGENT_SL_MIN.
+        """
+        positions = mt5.positions_get(symbol=symbol)
+        if not positions:
+            return
+        magic = self.account_config['magic_number']
+        for pos in positions:
+            if pos.magic != magic:
+                continue
+            if pos.profit >= 0:
+                continue  # Only tighten losers
+            if pos.sl == 0.0:
+                continue  # No SL to tighten
+
+            symbol_info = mt5.symbol_info(symbol)
+            if symbol_info is None:
+                continue
+            tick_size = symbol_info.trade_tick_size
+            tick_value = symbol_info.trade_tick_value
+            point = symbol_info.point
+
+            # Current SL distance
+            current_sl_dist = abs(pos.price_open - pos.sl)
+            new_sl_dist = current_sl_dist * tighten_factor
+
+            # Respect AGENT_SL_MIN
+            if tick_value > 0 and pos.volume > 0:
+                min_sl_dist = AGENT_SL_MIN / (tick_value * pos.volume) * tick_size
+            else:
+                min_sl_dist = 0
+            new_sl_dist = max(new_sl_dist, min_sl_dist)
+
+            if new_sl_dist >= current_sl_dist:
+                continue  # Would loosen, skip
+
+            # Calculate new SL price
+            digits = symbol_info.digits
+            if pos.type == 0:  # BUY
+                new_sl = round(pos.price_open - new_sl_dist, digits)
+            else:  # SELL
+                new_sl = round(pos.price_open + new_sl_dist, digits)
+
+            try:
+                request = {
+                    "action": mt5.TRADE_ACTION_SLTP,
+                    "symbol": symbol,
+                    "position": pos.ticket,
+                    "sl": new_sl,
+                    "tp": pos.tp,
+                }
+                result = mt5.order_send(request)
+                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    logging.info(
+                        f"[{self.account_key}][{symbol}] LIPOLYSIS: "
+                        f"tightened SL on #{pos.ticket} "
+                        f"{current_sl_dist:.5f} -> {new_sl_dist:.5f} "
+                        f"({(1-tighten_factor)*100:.1f}% tighter)"
+                    )
+                else:
+                    logging.debug(
+                        f"[{self.account_key}] Lipolysis SL modify failed: "
+                        f"{result.retcode if result else 'None'}"
+                    )
+            except Exception as e:
+                logging.debug(f"[{self.account_key}] Lipolysis error: {e}")
+
     def execute_trade(self, symbol: str, action: Action, confidence: float) -> bool:
         if action not in [Action.BUY, Action.SELL]:
             return False
@@ -795,6 +879,36 @@ class AccountTrader:
             if regime == Regime.CLEAN and action in [Action.BUY, Action.SELL]:
                 trade_executed = self.execute_trade(symbol, action, confidence)
 
+            # Growth Amplifier: Hyperplasia (second position on strong growth)
+            growth_reason = ""
+            hyperplasia_executed = False
+            if trade_executed and self.teqa_bridge is not None:
+                try:
+                    signal = self.teqa_bridge.read_signal(symbol=symbol)
+                    if signal and signal.growth_active and signal.growth_hyperplasia:
+                        ratio = signal.growth_second_lot_ratio
+                        if ratio > 0:
+                            hyperplasia_executed = self.execute_trade(
+                                symbol, action, confidence
+                            )
+                            growth_reason = (
+                                f"GROWTH: hyperplasia={ratio:.0%} lot "
+                                f"| signal={signal.growth_signal:.3f} "
+                                f"| variant={signal.growth_variant}"
+                            )
+                            logging.info(f"[{self.account_key}][{symbol}] {growth_reason}")
+                except Exception as ge:
+                    logging.debug(f"[{self.account_key}] Growth hyperplasia check: {ge}")
+
+            # Growth Amplifier: Lipolysis (tighten SL on losing positions)
+            if self.teqa_bridge is not None:
+                try:
+                    signal = self.teqa_bridge.read_signal(symbol=symbol)
+                    if signal and signal.growth_active and signal.growth_lipolysis_factor < 1.0:
+                        self._apply_lipolysis(symbol, signal.growth_lipolysis_factor)
+                except Exception as le:
+                    logging.debug(f"[{self.account_key}] Growth lipolysis check: {le}")
+
             results[symbol] = {
                 'regime': regime.value,
                 'fidelity': fidelity,
@@ -804,6 +918,7 @@ class AccountTrader:
                 'teqa': teqa_reason if teqa_reason else 'disabled',
                 'qnif': qnif_reason if qnif_reason else 'disabled',
                 'toxo_dd': toxo_reason if toxo_reason else 'disabled',
+                'growth': growth_reason if growth_reason else 'inactive',
             }
 
             # Send to QuantumChildren network
@@ -912,6 +1027,39 @@ class AccountTrader:
 
 
 # ============================================================
+# REST SCHEDULE GATE
+# ============================================================
+
+def is_rest_window(symbol: str) -> bool:
+    """Check if the given symbol is currently in a rest window.
+    Uses UTC time. Forex and crypto have separate rest schedules."""
+    if not REST_SCHEDULE_ENABLED:
+        return False
+
+    now = datetime.utcnow()
+    asset_class = get_asset_class(symbol)
+    windows = REST_FOREX_WINDOWS if asset_class == 'forex' else REST_CRYPTO_WINDOWS
+
+    day_names = {0: 'monday', 1: 'tuesday', 2: 'wednesday',
+                 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
+    current_day = day_names[now.weekday()]
+    current_time = now.strftime('%H:%M')
+
+    for window in windows:
+        day_rule = window.get('day', '').lower()
+        start = window.get('start', '00:00')
+        end = window.get('end', '23:59')
+
+        day_match = (day_rule == 'daily' or day_rule == current_day)
+        time_match = (start <= current_time <= end)
+
+        if day_match and time_match:
+            return True
+
+    return False
+
+
+# ============================================================
 # MAIN BRAIN
 # ============================================================
 
@@ -919,11 +1067,19 @@ class AtlasBrain:
     def __init__(self, config: BrainConfig = None):
         self.config = config or BrainConfig()
         self.traders: Dict[str, AccountTrader] = {}
+        self._state_managers: Dict[str, StatePersistence] = {}
+        self._was_resting: Dict[str, bool] = {}
 
     def initialize(self) -> bool:
         logging.info("Initializing Atlas brain")
         for key in ACCOUNTS:
             self.traders[key] = AccountTrader(key, ACCOUNTS[key], self.config)
+            # Set up state persistence per account
+            if STATE_PERSISTENCE_ENABLED:
+                sp = StatePersistence(account_key=key)
+                self._state_managers[key] = sp
+                sp.restore_state(self.traders[key])
+                self._was_resting[key] = False
         return True
 
     def run_loop(self):
@@ -946,6 +1102,29 @@ class AtlasBrain:
                 print(f"\n{'='*60}")
                 print(f"  {ACCOUNTS[key]['name']} | {datetime.now().strftime('%H:%M:%S')}")
                 print(f"{'='*60}")
+
+                # Check rest schedule for this account's symbols
+                trading_symbols = ACCOUNTS[key].get('symbols', [])
+                all_resting = all(is_rest_window(s) for s in trading_symbols) if trading_symbols else False
+                sp = self._state_managers.get(key)
+
+                # Handle rest/wake transitions
+                if all_resting and not self._was_resting.get(key, False):
+                    logging.info(f"[{key}] ENTERING REST — persisting state")
+                    if sp:
+                        sp.save_state(trader)
+                    self._was_resting[key] = True
+                elif not all_resting and self._was_resting.get(key, False):
+                    logging.info(f"[{key}] WAKING FROM REST — restoring state")
+                    if sp:
+                        sp.restore_state(trader)
+                    self._was_resting[key] = False
+
+                if all_resting:
+                    print(f"  [REST] All symbols in rest window — skipping trade execution")
+                    idx = (idx + 1) % len(account_keys)
+                    time.sleep(self.config.CHECK_INTERVAL_SECONDS)
+                    continue
 
                 if trader.connect():
                     results = trader.run_cycle()
@@ -999,11 +1178,19 @@ class AtlasBrain:
                         except Exception:
                             pass
 
+                # Periodic state save (every 30 min)
+                if sp and sp.should_periodic_save():
+                    sp.save_state(trader)
+
                 idx = (idx + 1) % len(account_keys)
                 time.sleep(self.config.CHECK_INTERVAL_SECONDS)
 
         except KeyboardInterrupt:
-            logging.info("Stopped")
+            logging.info("Stopped — saving state before exit")
+            for key, trader in self.traders.items():
+                sp = self._state_managers.get(key)
+                if sp:
+                    sp.save_state(trader)
         finally:
             mt5.shutdown()
 
@@ -1013,11 +1200,38 @@ class AtlasBrain:
 # ============================================================
 
 if __name__ == "__main__":
-    # Pre-launch validation - ensures experts are trained before trading
-    TRADING_SYMBOLS = ['BTCUSD', 'ETHUSD']
-    if not validate_prelaunch(symbols=TRADING_SYMBOLS):
-        logging.error("Pre-launch validation failed. Exiting.")
-        sys.exit(1)
+    # CRITICAL: Acquire process lock BEFORE doing anything
+    # This prevents multiple instances from fighting over the same MT5 account
+    lock = ProcessLock("BRAIN_ATLAS", account="212000584")
 
-    brain = AtlasBrain()
-    brain.run_loop()
+    try:
+        with lock:
+            logging.info("=" * 60)
+            logging.info("BRAIN_ATLAS - PROCESS LOCK ACQUIRED")
+            logging.info("=" * 60)
+
+            # Pre-launch validation - ensures experts are trained before trading
+            TRADING_SYMBOLS = ['BTCUSD', 'ETHUSD']
+            if not validate_prelaunch(symbols=TRADING_SYMBOLS):
+                logging.error("Pre-launch validation failed. Exiting.")
+                sys.exit(1)
+
+            brain = AtlasBrain()
+            brain.run_loop()
+
+    except RuntimeError as e:
+        logging.error("=" * 60)
+        logging.error("PROCESS LOCK FAILURE")
+        logging.error("=" * 60)
+        logging.error(str(e))
+        logging.error("")
+        logging.error("Another instance of BRAIN_ATLAS is already running.")
+        logging.error("This prevents duplicate trades on account 212000584.")
+        logging.error("")
+        logging.error("To stop all processes safely:")
+        logging.error("  Run: SAFE_SHUTDOWN.bat")
+        logging.error("")
+        logging.error("To check running processes:")
+        logging.error("  Run: python process_lock.py --list")
+        logging.error("=" * 60)
+        sys.exit(1)

@@ -26,7 +26,7 @@ ROLLING_SL_MULTIPLIER:    1.5        ← SL rolls up by 1.5x
 DYNAMIC_TP_PERCENT:       50         ← 50% partial TP
 SET_DYNAMIC_TP:           true       ← Dynamic TP enabled
 ROLLING_SL_ENABLED:       true       ← Rolling SL enabled
-CONFIDENCE_THRESHOLD:     0.22       ← Min confidence to trade
+CONFIDENCE_THRESHOLD:     0.70       ← Min confidence to trade
 ATR_MULTIPLIER:           0.0438     ← ATR mult for SL distance (lot adjusts for $1 risk)
 AGENT_SL_MIN:             $0.50      ← Agent SL floor
 AGENT_SL_MAX:             $1.00      ← Agent SL ceiling
