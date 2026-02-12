@@ -21,7 +21,7 @@ import argparse
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Optional, Tuple, Dict, List
 from dataclasses import dataclass
@@ -51,6 +51,7 @@ from config_loader import (
     CHECK_INTERVAL_SECONDS,
     REQUIRE_TRAINED_EXPERT,
     LSTM_MAX_AGE_DAYS,
+    get_symbol_risk,
 )
 
 # Import credentials securely - passwords from .env file
@@ -100,6 +101,13 @@ try:
     PROTECTIVE_DELETION_ENABLED = True
 except ImportError:
     PROTECTIVE_DELETION_ENABLED = False
+
+# Toxoplasma regime detector with intraday DD protection
+try:
+    from toxoplasma import ToxoplasmaEngine, ToxoplasmaTEQABridge
+    TOXOPLASMA_ENABLED = True
+except ImportError:
+    TOXOPLASMA_ENABLED = False
 
 # Configure logging
 logging.basicConfig(
@@ -434,7 +442,29 @@ class AccountTrader:
                 logging.info(f"[{account_key}] Protective Deletion initialized")
             except Exception as e:
                 logging.warning(f"[{account_key}] Protective Deletion init failed: {e}")
+        # Toxoplasma regime detector with intraday DD protection
+        self.toxoplasma_engine = None
+        self.toxoplasma_bridge = None
+        if TOXOPLASMA_ENABLED:
+            try:
+                self.toxoplasma_engine = ToxoplasmaEngine()
+                self.toxoplasma_bridge = ToxoplasmaTEQABridge(
+                    engine=self.toxoplasma_engine,
+                )
+                logging.info(
+                    f"[{account_key}] Toxoplasma engine initialized "
+                    f"(DD protection={'ON' if self.toxoplasma_engine.dd_tracker else 'OFF'})"
+                )
+            except Exception as e:
+                logging.warning(f"[{account_key}] Toxoplasma init failed: {e}")
+        # Track closed tickets to avoid double-counting in DD tracker
+        self._dd_seen_tickets = set()
         self.starting_balance = 0.0
+
+        # Loss cooldown — prevent re-entry after SL hit
+        # Key: symbol, Value: datetime when cooldown expires
+        self._loss_cooldown: Dict[str, datetime] = {}
+        self.LOSS_COOLDOWN_MINUTES = 15  # Wait 15 min after a loss before re-entering
 
     def connect(self) -> bool:
         """Connect to MT5 - ONLY accept correct account"""
@@ -511,9 +541,9 @@ class AccountTrader:
         desired_lot = (account_info.balance / 100000) * 0.01
         lot = round(desired_lot / vol_step) * vol_step
 
-        # Respect symbol's actual min/max, then cap at our max (0.05)
+        # Respect symbol's actual min/max
         lot = max(vol_min, lot)  # Use symbol's minimum, not hardcoded 0.01
-        lot = min(lot, min(vol_max, 0.05))  # Cap at 0.05 or symbol max
+        lot = min(lot, vol_max)  # Respect broker max
 
         logging.info(f"[{self.account_key}][{symbol}] Lot: {lot} (min={vol_min}, step={vol_step})")
         return lot
@@ -574,6 +604,13 @@ class AccountTrader:
             logging.info(f"[{self.account_key}] Already have position in {symbol}")
             return False
 
+        # Loss cooldown — don't re-enter a symbol that just hit SL
+        cooldown_until = self._loss_cooldown.get(symbol)
+        if cooldown_until and datetime.now() < cooldown_until:
+            remaining = (cooldown_until - datetime.now()).total_seconds() / 60
+            logging.info(f"[{self.account_key}][{symbol}] COOLDOWN: {remaining:.1f}min remaining after loss")
+            return False
+
         symbol_info = mt5.symbol_info(symbol)
         if symbol_info is None:
             return False
@@ -599,9 +636,10 @@ class AccountTrader:
 
         logging.info(f"[{self.account_key}][{symbol}] Symbol specs: tick_val={tick_value}, tick_size={tick_size}, point={point}, stops_level={stops_level}, spread={spread}")
 
-        # Calculate SL distance for MAX_LOSS_DOLLARS
+        # Calculate SL distance — use per-symbol risk (ETHUSD=$2, others=$1)
+        symbol_risk = get_symbol_risk(symbol)
         if tick_value > 0 and lot > 0:
-            sl_ticks = MAX_LOSS_DOLLARS / (tick_value * lot)
+            sl_ticks = symbol_risk / (tick_value * lot)
             sl_distance = sl_ticks * tick_size
         else:
             sl_distance = 100 * point
@@ -615,12 +653,12 @@ class AccountTrader:
             # Recalculate lot to maintain max loss limit with wider SL
             new_sl_ticks = sl_distance / tick_size if tick_size > 0 else 0
             if tick_value > 0 and new_sl_ticks > 0:
-                new_lot = MAX_LOSS_DOLLARS / (tick_value * new_sl_ticks)
+                new_lot = symbol_risk / (tick_value * new_sl_ticks)
                 new_lot = max(symbol_info.volume_min, new_lot)
                 new_lot = round(new_lot / symbol_info.volume_step) * symbol_info.volume_step
                 if new_lot < lot:
                     lot = new_lot
-                    logging.info(f"[{self.account_key}][{symbol}] Reduced lot to {lot} to maintain ${MAX_LOSS_DOLLARS} max loss")
+                    logging.info(f"[{self.account_key}][{symbol}] Reduced lot to {lot} to maintain ${symbol_risk} max loss")
 
         # TP from config
         tp_distance = sl_distance * TP_MULTIPLIER
@@ -650,7 +688,7 @@ class AccountTrader:
             return False
 
         logging.info(f"[{self.account_key}][{symbol}] Price: {price}, SL: {sl}, TP: {tp}, Lot: {lot}")
-        logging.info(f"[{self.account_key}][{symbol}] SL Distance: {sl_distance:.5f} | Max Loss: ${MAX_LOSS_DOLLARS}")
+        logging.info(f"[{self.account_key}][{symbol}] SL Distance: {sl_distance:.5f} | Max Loss: ${symbol_risk} ({'override' if symbol_risk != MAX_LOSS_DOLLARS else 'default'})")
 
         filling_mode = mt5.ORDER_FILLING_IOC
         if symbol_info.filling_mode & mt5.ORDER_FILLING_FOK:
@@ -716,6 +754,44 @@ class AccountTrader:
                 confidence = final_conf
                 logging.info(f"[{self.account_key}][{symbol}] {qnif_reason}")
 
+            # Apply Toxoplasma DD protection gate (intraday drawdown throttle)
+            toxo_reason = ""
+            if self.toxoplasma_engine is not None and action in [Action.BUY, Action.SELL]:
+                try:
+                    # Get current unrealized P/L across all positions
+                    unrealized_total = 0.0
+                    all_positions = mt5.positions_get()
+                    if all_positions:
+                        for pos in all_positions:
+                            if pos.magic == self.account_config['magic_number']:
+                                unrealized_total += pos.profit
+
+                    # Check DD state -- this is fast (in-memory)
+                    dd_state = self.toxoplasma_engine.get_dd_state(self.account_key)
+                    if dd_state and dd_state.get('dd_blocked', False):
+                        action = Action.HOLD
+                        confidence = 0.0
+                        toxo_reason = (
+                            f"[TOXO:DD] BLOCKED - daily DD at "
+                            f"{dd_state['dd_pct']:.1f}% "
+                            f"(${dd_state['closed_pnl']:.2f} closed)"
+                        )
+                    elif dd_state and dd_state.get('dd_level') == 'warning':
+                        supp = dd_state.get('dopamine_suppression', 1.0)
+                        toxo_reason = (
+                            f"[TOXO:DD] WARNING - DD at "
+                            f"{dd_state['dd_pct']:.1f}% | "
+                            f"size_mult={supp:.3f}"
+                        )
+                    else:
+                        toxo_reason = "[TOXO:DD] normal"
+
+                    if toxo_reason:
+                        logging.info(f"[{self.account_key}][{symbol}] {toxo_reason}")
+
+                except Exception as te:
+                    logging.debug(f"[{self.account_key}] Toxoplasma DD check error: {te}")
+
             if regime == Regime.CLEAN and action in [Action.BUY, Action.SELL]:
                 trade_executed = self.execute_trade(symbol, action, confidence)
 
@@ -727,6 +803,7 @@ class AccountTrader:
                 'trade_executed': trade_executed,
                 'teqa': teqa_reason if teqa_reason else 'disabled',
                 'qnif': qnif_reason if qnif_reason else 'disabled',
+                'toxo_dd': toxo_reason if toxo_reason else 'disabled',
             }
 
             # Send to QuantumChildren network
@@ -755,6 +832,13 @@ class AccountTrader:
                     logging.info(f"[{self.account_key}] DOMESTICATION: "
                                  f"{'WIN' if o['won'] else 'LOSS'} {o['symbol']} "
                                  f"${o['profit']:.2f} | TEs: {o['te_combo']}")
+                    # Set loss cooldown — prevent rapid re-entry after SL hit
+                    if not o['won']:
+                        cooldown_until = datetime.now() + timedelta(minutes=self.LOSS_COOLDOWN_MINUTES)
+                        self._loss_cooldown[o['symbol']] = cooldown_until
+                        logging.warning(f"[{self.account_key}][{o['symbol']}] LOSS COOLDOWN: "
+                                        f"no new trades until {cooldown_until.strftime('%H:%M:%S')} "
+                                        f"({self.LOSS_COOLDOWN_MINUTES}min)")
                     # Feed to VDJ immune memory
                     if self.vdj_engine and o.get('active_tes'):
                         try:
@@ -801,6 +885,26 @@ class AccountTrader:
                             )
                         except Exception as pe:
                             logging.debug(f"[{self.account_key}] Protective Deletion error: {pe}")
+                    # Feed to Toxoplasma DD tracker (intraday drawdown accumulation)
+                    if self.toxoplasma_engine is not None:
+                        try:
+                            ticket = o.get('ticket', 0)
+                            if ticket and ticket not in self._dd_seen_tickets:
+                                self._dd_seen_tickets.add(ticket)
+                                self.toxoplasma_engine.feed_dd_closed_trade(
+                                    self.account_key, o['profit'],
+                                )
+                                dd_st = self.toxoplasma_engine.get_dd_state(self.account_key)
+                                if dd_st and dd_st['dd_level'] != 'normal':
+                                    logging.warning(
+                                        f"[{self.account_key}] DD TRACKER: "
+                                        f"{dd_st['dd_level'].upper()} "
+                                        f"({dd_st['dd_pct']:.1f}%) "
+                                        f"closed=${dd_st['closed_pnl']:.2f} "
+                                        f"supp={dd_st['dopamine_suppression']:.3f}"
+                                    )
+                        except Exception as dde:
+                            logging.debug(f"[{self.account_key}] Toxoplasma DD feed error: {dde}")
             except Exception as e:
                 logging.debug(f"[{self.account_key}] Feedback poll error: {e}")
 
@@ -876,6 +980,22 @@ class AtlasBrain:
                             print(f"  [DEL] patterns={af.total_patterns} | "
                                   f"het={af.het_patterns} hom={af.hom_patterns} | "
                                   f"health={af.health}")
+                        except Exception:
+                            pass
+                    # Show Toxoplasma DD protection status
+                    if trader.toxoplasma_engine is not None:
+                        try:
+                            dd_st = trader.toxoplasma_engine.get_dd_state(key)
+                            if dd_st:
+                                lvl = dd_st['dd_level'].upper()
+                                print(
+                                    f"  [TOXO:DD] {lvl} | "
+                                    f"DD={dd_st['dd_pct']:.1f}% | "
+                                    f"closed=${dd_st['closed_pnl']:.2f} / "
+                                    f"{dd_st['closed_trades']} trades | "
+                                    f"supp={dd_st['dopamine_suppression']:.3f}"
+                                    f"{' | BLOCKED' if dd_st['dd_blocked'] else ''}"
+                                )
                         except Exception:
                             pass
 

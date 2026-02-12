@@ -467,6 +467,7 @@ double CXAUGridManager::CalculateRegimeConfidence(void)
          break;
 
       case XAUUSD_REGIME_NEUTRAL:
+         {
          // Neutral: Price near EMA200, EMAs converging
          double distFromEma200 = MathAbs(price - ema200) / ema200;
          double emaDiff = MathAbs(emaFast - emaSlow) / emaSlow;
@@ -481,6 +482,7 @@ double CXAUGridManager::CalculateRegimeConfidence(void)
          else if(emaDiff < 0.006) confidence += 0.25;
          else confidence += 0.10;
          break;
+         }
    }
 
    return MathMin(confidence, 1.0);

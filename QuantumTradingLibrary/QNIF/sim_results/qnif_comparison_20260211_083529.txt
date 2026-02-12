@@ -1,0 +1,99 @@
+==============================================================================
+  QNIF 1-MONTH WALK-FORWARD COMPARISON
+  Baseline (No Immune System) vs Full QNIF (Immune Active)
+  Generated: 2026-02-11 08:35:29
+==============================================================================
+
+  Config: SL=$1.00 | TP=3x SL | Rolling SL=1.5x | Dynamic TP=50%
+  Confidence Threshold: 0.22
+  ATR Multiplier: 0.0438
+
+------------------------------------------------------------------------------
+  BTCUSD
+------------------------------------------------------------------------------
+  Metric                                Baseline            QNIF           Delta
+  ============================== =============== =============== ===============
+  Win Rate                                 16.7%            0.0%          -16.7%
+  Profit Factor                             0.62            0.00           -0.62
+  Max Drawdown ($)                        $47.91          $46.89          -1.02$
+  Net P/L ($)                             $-1.90          $-3.93          -2.03$
+  Total Trades                                 6               4              -2
+  Winners                                      1               0              -1
+  Losers                                       5               4              -1
+  Avg Win ($)                              $3.05           $0.00
+  Avg Loss ($)                             $0.99           $0.98
+  Entry Signals                                6               6
+  Days Traded                                 31              31
+  ---------------------------------------------------------------------------
+  CRISPR Blocks                              N/A               2
+  VDJ Memory Recalls                         N/A               4
+  QNIF Consensus Filtered                    N/A               0
+  Total Immune Interventions                 N/A               2
+
+------------------------------------------------------------------------------
+  ETHUSD
+------------------------------------------------------------------------------
+  Metric                                Baseline            QNIF           Delta
+  ============================== =============== =============== ===============
+  Win Rate                                 60.0%           75.0%          +15.0%
+  Profit Factor                             5.70           15.49           +9.79
+  Max Drawdown ($)                        $66.72          $65.76          -0.96$
+  Net P/L ($)                              $7.42           $8.42          +1.00$
+  Total Trades                                 5               4              -1
+  Winners                                      3               3              +0
+  Losers                                       2               1              -1
+  Avg Win ($)                              $3.00           $3.00
+  Avg Loss ($)                             $0.79           $0.58
+  Entry Signals                                5               5
+  Days Traded                                 31              31
+  ---------------------------------------------------------------------------
+  CRISPR Blocks                              N/A               1
+  VDJ Memory Recalls                         N/A               4
+  QNIF Consensus Filtered                    N/A               0
+  Total Immune Interventions                 N/A               1
+
+------------------------------------------------------------------------------
+  XAUUSD
+------------------------------------------------------------------------------
+  Metric                                Baseline            QNIF           Delta
+  ============================== =============== =============== ===============
+  Win Rate                                 50.0%           50.0%           +0.0%
+  Profit Factor                             2.97            3.09           +0.12
+  Max Drawdown ($)                       $188.76         $166.05         -22.71$
+  Net P/L ($)                              $7.69           $6.05          -1.63$
+  Total Trades                                 8               6              -2
+  Winners                                      4               3              -1
+  Losers                                       4               3              -1
+  Avg Win ($)                              $2.90           $2.98
+  Avg Loss ($)                             $0.98           $0.97
+  Entry Signals                                8               8
+  Days Traded                                 30              30
+  ---------------------------------------------------------------------------
+  CRISPR Blocks                              N/A               2
+  VDJ Memory Recalls                         N/A               6
+  QNIF Consensus Filtered                    N/A               0
+  Total Immune Interventions                 N/A               2
+
+==============================================================================
+  AGGREGATE COMPARISON (ALL SYMBOLS)
+==============================================================================
+  Metric                                Baseline            QNIF           Delta
+  ============================== =============== =============== ===============
+  Total Net P/L ($)                       $13.20          $10.54          -2.66$
+  Aggregate Win Rate                       42.1%           42.9%           +0.8%
+  Total Trades                                19              14              -5
+  Worst Symbol DD ($)                    $188.76         $166.05         -22.71$
+
+  ============================IMMUNE SYSTEM ACTIVITY============================
+  Trades Blocked by CRISPR                               5
+  Trades Influenced by VDJ Memory                       14
+  Signals Filtered by QNIF Consensus                     0
+  Total Immune Interventions                             5
+
+==============================================================================
+  >>> THE IMMUNE SYSTEM REDUCED P/L BY $2.66 <<<
+      (Filtered 5 losing signals, net cost of selectivity)
+  >>> WIN RATE IMPROVED BY 0.8 PERCENTAGE POINTS <<<
+  >>> MAX DRAWDOWN REDUCED BY $22.71 <<<
+  >>> 5 BAD TRADES PREVENTED (26.3% of baseline signals) <<<
+==============================================================================

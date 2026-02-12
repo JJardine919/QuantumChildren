@@ -1,0 +1,107 @@
+{
+    "VERSION": "1.0 - Signal Farm Protocol",
+    "CREATED": "2026-02-09",
+
+    "PROTOCOL": {
+        "NAME": "Single-Symbol Intensive Training",
+        "DESCRIPTION": "Learn ALL timeframes first so EA can decide per-TF",
+        "LOOKBACK_MONTHS": 12,
+        "CYCLES_PER_TIMEFRAME": 2,
+        "TRAIN_MONTHS": 4,
+        "TEST_MONTHS": 2,
+        "TOTAL_TIMEFRAMES": 17,
+        "TOTAL_ROUNDS": 34,
+        "NOTES": [
+            "2 cycles of 4-train/2-test = 12 months = 1 year lookback",
+            "Cycle 2 shifts/jostles forward to avoid overfitting",
+            "Learn all TFs before specializing on any single one",
+            "Decision gate after first full cycle to evaluate win rate gains"
+        ]
+    },
+
+    "SYMBOL": "BTCUSD",
+    "SINGLE_SYMBOL_FOCUS": true,
+
+    "TIMEFRAMES": [
+        {"name": "M1",  "mt5_const": "TIMEFRAME_M1",  "bars_per_day": 1440, "order": 1},
+        {"name": "M2",  "mt5_const": "TIMEFRAME_M2",  "bars_per_day": 720,  "order": 2},
+        {"name": "M3",  "mt5_const": "TIMEFRAME_M3",  "bars_per_day": 480,  "order": 3},
+        {"name": "M4",  "mt5_const": "TIMEFRAME_M4",  "bars_per_day": 360,  "order": 4},
+        {"name": "M5",  "mt5_const": "TIMEFRAME_M5",  "bars_per_day": 288,  "order": 5},
+        {"name": "M6",  "mt5_const": "TIMEFRAME_M6",  "bars_per_day": 240,  "order": 6},
+        {"name": "M10", "mt5_const": "TIMEFRAME_M10", "bars_per_day": 144,  "order": 7},
+        {"name": "M12", "mt5_const": "TIMEFRAME_M12", "bars_per_day": 120,  "order": 8},
+        {"name": "M15", "mt5_const": "TIMEFRAME_M15", "bars_per_day": 96,   "order": 9},
+        {"name": "M20", "mt5_const": "TIMEFRAME_M20", "bars_per_day": 72,   "order": 10},
+        {"name": "M30", "mt5_const": "TIMEFRAME_M30", "bars_per_day": 48,   "order": 11},
+        {"name": "H1",  "mt5_const": "TIMEFRAME_H1",  "bars_per_day": 24,   "order": 12},
+        {"name": "H2",  "mt5_const": "TIMEFRAME_H2",  "bars_per_day": 12,   "order": 13},
+        {"name": "H3",  "mt5_const": "TIMEFRAME_H3",  "bars_per_day": 8,    "order": 14},
+        {"name": "H4",  "mt5_const": "TIMEFRAME_H4",  "bars_per_day": 6,    "order": 15},
+        {"name": "H6",  "mt5_const": "TIMEFRAME_H6",  "bars_per_day": 4,    "order": 16},
+        {"name": "H8",  "mt5_const": "TIMEFRAME_H8",  "bars_per_day": 3,    "order": 17}
+    ],
+
+    "SIMULATION": {
+        "NUM_ACCOUNTS": 100,
+        "ACCOUNT_BALANCE": 100000.0,
+        "MAX_DAILY_DD_PCT": 5.0,
+        "MAX_TOTAL_DD_PCT": 10.0,
+        "PROFIT_TARGET_PCT": 10.0,
+        "MAX_POSITIONS_PER_ACCOUNT": 20,
+        "LOT_MIN": 0.01,
+        "LOT_MAX": 0.24,
+        "PARALLEL_BATCH_SIZE": 25,
+        "NOTES": [
+            "100 accounts run in parallel batches of 25",
+            "Each account runs HARDER rules than real prop firms",
+            "Evolutionary pressure - only fittest parameters survive"
+        ]
+    },
+
+    "GPU": {
+        "USE_GPU": true,
+        "DEVICE_TYPE": "directml",
+        "MAX_WORKERS_PER_GPU": 8,
+        "TENSOR_BATCH_SIZE": 4096,
+        "NOTES": [
+            "AMD RX 6800 XT via DirectML",
+            "LSTM stays on CPU - use 1D-Conv/Transformer for GPU training",
+            "GPU handles: tensor ops, inference, batch evaluation"
+        ]
+    },
+
+    "GENETIC": {
+        "POPULATION_SIZE": 50,
+        "ELITE_SIZE": 3,
+        "TOURNAMENT_SIZE": 5,
+        "MUTATION_RATE": 0.15,
+        "MUTATION_STRENGTH": 0.15,
+        "EXTINCTION_EVERY_N_ROUNDS": 2,
+        "FRESH_INJECTION_COUNT": 5,
+        "CHAMPIONS_PER_CYCLE": [2, 5],
+        "TARGET_WIN_RATE": 70.0
+    },
+
+    "SIGNALS": {
+        "COLLECT_ALL": true,
+        "SIGNAL_OUTPUT_DIR": "signal_farm_output",
+        "SAVE_EVERY_N_ROUNDS": 1,
+        "EXPORT_FORMAT": "json",
+        "AGGREGATE_STATS": true
+    },
+
+    "DECISION_GATES": {
+        "AFTER_FIRST_CYCLE": {
+            "ENABLED": true,
+            "MIN_WIN_RATE_IMPROVEMENT": 2.0,
+            "ACTION_IF_NO_IMPROVEMENT": "FLAG_USER",
+            "NOTES": "After first full cycle across all TFs, check win rate trend"
+        },
+        "EXTEND_TRAINING": {
+            "ENABLED": false,
+            "EXTRA_CYCLES": 0,
+            "NOTES": "Set by user based on first cycle results"
+        }
+    }
+}

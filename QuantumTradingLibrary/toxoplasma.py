@@ -48,6 +48,16 @@ import numpy as np
 
 # Import trading settings from config_loader (NEVER hardcode)
 from config_loader import CONFIDENCE_THRESHOLD, MAX_LOSS_DOLLARS
+from config_loader import (
+    DD_PROTECTION_ENABLED,
+    DAILY_DD_LIMIT_DOLLARS,
+    DD_WARNING_THRESHOLD_PCT,
+    DD_CRITICAL_THRESHOLD_PCT,
+    DD_WARNING_DOPAMINE_MULT,
+    DD_CRITICAL_DOPAMINE_MULT,
+    DD_RESET_HOUR_UTC,
+    DD_INCLUDE_UNREALIZED,
+)
 
 log = logging.getLogger(__name__)
 
@@ -228,6 +238,275 @@ class TradeRecord:
     regime: str = RegimeType.RANGING.value
     timestamp: str = ""
     active_tes: List[str] = field(default_factory=list)
+
+
+# ============================================================
+# INTRADAY DRAWDOWN TRACKER
+# ============================================================
+
+class DrawdownLevel(Enum):
+    """Intraday drawdown severity classification."""
+    NORMAL = "normal"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+@dataclass
+class IntradayDrawdownState:
+    """
+    Current intraday drawdown tracking state.
+
+    Tracks cumulative closed P/L for the current trading day.
+    When losses approach the daily DD ceiling, this triggers
+    dopamine suppression in the Toxoplasma engine to throttle
+    position sizing and eventually block new trades.
+    """
+    trading_day: str = ""
+    cumulative_closed_pnl: float = 0.0
+    unrealized_pnl: float = 0.0
+    closed_trade_count: int = 0
+    dd_limit: float = DAILY_DD_LIMIT_DOLLARS
+    warning_threshold_pct: float = DD_WARNING_THRESHOLD_PCT
+    critical_threshold_pct: float = DD_CRITICAL_THRESHOLD_PCT
+    warning_dollars: float = 0.0
+    critical_dollars: float = 0.0
+    current_dd_pct: float = 0.0
+    dd_level: str = DrawdownLevel.NORMAL.value
+    dopamine_suppression: float = 1.0  # 1.0 = no suppression, 0.0 = full block
+    last_updated: str = ""
+
+
+class IntradayDrawdownTracker:
+    """
+    Tracks intraday cumulative closed P/L and signals the Toxoplasma
+    engine when losses approach the daily drawdown ceiling.
+
+    This is the "fever response" -- when the organism is losing too much
+    blood (capital) in a single day, it triggers a systemic immune
+    shutdown (reduced dopamine / risk appetite) to prevent death
+    (account blow / prop firm violation).
+
+    The tracker:
+      1. Accumulates closed trade P/L for the current trading day
+      2. Computes current drawdown as a percentage of the DD limit
+      3. At WARNING level (default 60% of limit): dopamine is halved
+      4. At CRITICAL level (default 80% of limit): dopamine drops to near-zero
+      5. Resets at the configured UTC hour (default midnight UTC)
+
+    All thresholds come from MASTER_CONFIG.json via config_loader.
+    """
+
+    def __init__(
+        self,
+        dd_limit: float = None,
+        warning_pct: float = None,
+        critical_pct: float = None,
+        warning_dopamine_mult: float = None,
+        critical_dopamine_mult: float = None,
+        reset_hour_utc: int = None,
+        include_unrealized: bool = None,
+    ):
+        # All defaults from config_loader (which reads MASTER_CONFIG.json)
+        self.dd_limit = dd_limit if dd_limit is not None else DAILY_DD_LIMIT_DOLLARS
+        self.warning_pct = warning_pct if warning_pct is not None else DD_WARNING_THRESHOLD_PCT
+        self.critical_pct = critical_pct if critical_pct is not None else DD_CRITICAL_THRESHOLD_PCT
+        self.warning_dopamine_mult = (
+            warning_dopamine_mult if warning_dopamine_mult is not None
+            else DD_WARNING_DOPAMINE_MULT
+        )
+        self.critical_dopamine_mult = (
+            critical_dopamine_mult if critical_dopamine_mult is not None
+            else DD_CRITICAL_DOPAMINE_MULT
+        )
+        self.reset_hour_utc = reset_hour_utc if reset_hour_utc is not None else DD_RESET_HOUR_UTC
+        self.include_unrealized = (
+            include_unrealized if include_unrealized is not None
+            else DD_INCLUDE_UNREALIZED
+        )
+
+        # Computed dollar thresholds (negative = loss)
+        self.warning_dollars = self.dd_limit * (self.warning_pct / 100.0)
+        self.critical_dollars = self.dd_limit * (self.critical_pct / 100.0)
+
+        # Per-account intraday state
+        # key = account_id (e.g. "ATLAS", "BG_INSTANT")
+        self._state: Dict[str, IntradayDrawdownState] = {}
+
+        log.info(
+            "[Toxoplasma:DD] Intraday drawdown tracker initialized | "
+            "limit=$%.2f | warning=%d%% ($%.2f) | critical=%d%% ($%.2f) | "
+            "reset=%02d:00 UTC",
+            self.dd_limit, self.warning_pct, self.warning_dollars,
+            self.critical_pct, self.critical_dollars, self.reset_hour_utc,
+        )
+
+    def _get_trading_day(self) -> str:
+        """
+        Get the current trading day string, accounting for reset hour.
+
+        If reset_hour_utc=0, the day resets at midnight UTC.
+        If reset_hour_utc=17, the day resets at 5pm UTC (common for forex).
+        """
+        from datetime import timezone
+        now_utc = datetime.now(timezone.utc)
+        # If current hour < reset hour, we are still in the previous trading day
+        if now_utc.hour < self.reset_hour_utc:
+            day = now_utc - timedelta(days=1)
+        else:
+            day = now_utc
+        return day.strftime("%Y-%m-%d")
+
+    def _ensure_state(self, account_id: str) -> IntradayDrawdownState:
+        """Get or create state for an account, resetting if day changed."""
+        current_day = self._get_trading_day()
+        state = self._state.get(account_id)
+
+        if state is None or state.trading_day != current_day:
+            if state is not None and state.trading_day != current_day:
+                log.info(
+                    "[Toxoplasma:DD] Day rolled %s -> %s for %s | "
+                    "previous day: closed_pnl=$%.2f over %d trades",
+                    state.trading_day, current_day, account_id,
+                    state.cumulative_closed_pnl, state.closed_trade_count,
+                )
+            state = IntradayDrawdownState(
+                trading_day=current_day,
+                dd_limit=self.dd_limit,
+                warning_threshold_pct=self.warning_pct,
+                critical_threshold_pct=self.critical_pct,
+                warning_dollars=self.warning_dollars,
+                critical_dollars=self.critical_dollars,
+            )
+            self._state[account_id] = state
+
+        return state
+
+    def record_closed_trade(
+        self,
+        account_id: str,
+        profit: float,
+    ):
+        """
+        Record a closed trade's P/L for intraday DD tracking.
+
+        Args:
+            account_id: Account key (e.g. "ATLAS")
+            profit: Realized P/L in dollars (negative = loss)
+        """
+        state = self._ensure_state(account_id)
+        state.cumulative_closed_pnl += profit
+        state.closed_trade_count += 1
+        state.last_updated = datetime.now().isoformat()
+
+        # Recompute level
+        self._recompute_level(state, account_id)
+
+    def update_unrealized_pnl(
+        self,
+        account_id: str,
+        unrealized: float,
+    ):
+        """
+        Update the current unrealized P/L (for optional inclusion in DD calc).
+
+        Args:
+            account_id: Account key
+            unrealized: Total unrealized P/L across all open positions (dollars)
+        """
+        state = self._ensure_state(account_id)
+        state.unrealized_pnl = unrealized
+        state.last_updated = datetime.now().isoformat()
+
+        if self.include_unrealized:
+            self._recompute_level(state, account_id)
+
+    def _recompute_level(self, state: IntradayDrawdownState, account_id: str):
+        """Recompute the DD level, percentage, and dopamine suppression."""
+        # Total loss consideration
+        total_loss = state.cumulative_closed_pnl
+        if self.include_unrealized:
+            total_loss += state.unrealized_pnl
+
+        # We only care about losses (negative P/L)
+        # Convert to positive loss amount for percentage calc
+        loss_amount = max(0.0, -total_loss)
+
+        # DD percentage of limit
+        if self.dd_limit > 0:
+            state.current_dd_pct = (loss_amount / self.dd_limit) * 100.0
+        else:
+            state.current_dd_pct = 0.0
+
+        # Classify level
+        prev_level = state.dd_level
+        if state.current_dd_pct >= self.critical_pct:
+            state.dd_level = DrawdownLevel.CRITICAL.value
+            state.dopamine_suppression = self.critical_dopamine_mult
+        elif state.current_dd_pct >= self.warning_pct:
+            state.dd_level = DrawdownLevel.WARNING.value
+            # Smooth interpolation between warning and critical
+            t = (state.current_dd_pct - self.warning_pct) / max(
+                1.0, self.critical_pct - self.warning_pct
+            )
+            state.dopamine_suppression = _lerp(
+                self.warning_dopamine_mult, self.critical_dopamine_mult,
+                _clamp(t),
+            )
+        else:
+            state.dd_level = DrawdownLevel.NORMAL.value
+            state.dopamine_suppression = 1.0
+
+        # Log level transitions
+        if state.dd_level != prev_level:
+            log.warning(
+                "[Toxoplasma:DD] %s DD LEVEL CHANGE: %s -> %s | "
+                "loss=$%.2f / $%.2f (%.1f%%) | dopamine_mult=%.3f | "
+                "closed_trades=%d",
+                account_id, prev_level, state.dd_level,
+                loss_amount, self.dd_limit, state.current_dd_pct,
+                state.dopamine_suppression, state.closed_trade_count,
+            )
+
+    def get_dopamine_suppression(self, account_id: str) -> float:
+        """
+        Get the current dopamine suppression multiplier for an account.
+
+        Returns:
+            float: 1.0 = no suppression (normal trading)
+                   0.5 = warning level (half position sizing)
+                   0.05 = critical level (near-zero, blocks new trades)
+        """
+        state = self._ensure_state(account_id)
+        return state.dopamine_suppression
+
+    def get_state(self, account_id: str) -> IntradayDrawdownState:
+        """Get the full drawdown state for an account."""
+        return self._ensure_state(account_id)
+
+    def get_dd_level(self, account_id: str) -> str:
+        """Get the current drawdown level string for an account."""
+        state = self._ensure_state(account_id)
+        return state.dd_level
+
+    def is_trading_blocked(self, account_id: str) -> bool:
+        """Check if trading should be blocked due to critical DD level."""
+        state = self._ensure_state(account_id)
+        return state.dd_level == DrawdownLevel.CRITICAL.value
+
+    def get_summary(self) -> Dict:
+        """Get summary of all tracked accounts."""
+        summary = {}
+        for account_id, state in self._state.items():
+            summary[account_id] = {
+                "trading_day": state.trading_day,
+                "closed_pnl": state.cumulative_closed_pnl,
+                "unrealized_pnl": state.unrealized_pnl,
+                "closed_trades": state.closed_trade_count,
+                "dd_pct": round(state.current_dd_pct, 1),
+                "dd_level": state.dd_level,
+                "dopamine_suppression": round(state.dopamine_suppression, 3),
+            }
+        return summary
 
 
 # ============================================================
@@ -461,12 +740,18 @@ class ToxoplasmaEngine:
         # Regime classifier
         self.regime_classifier = RegimeClassifier()
 
+        # Intraday drawdown protection (fever response)
+        self.dd_tracker: Optional[IntradayDrawdownTracker] = None
+        if DD_PROTECTION_ENABLED:
+            self.dd_tracker = IntradayDrawdownTracker()
+
         # Load persisted baselines
         self._load_baselines()
 
         log.info(
-            "[Toxoplasma] Engine initialized | DB=%s | baselines=%d",
+            "[Toxoplasma] Engine initialized | DB=%s | baselines=%d | DD=%s",
             self.db_path, len(self._baselines),
+            "ENABLED" if self.dd_tracker else "DISABLED",
         )
 
     # ----------------------------------------------------------
@@ -1384,10 +1669,17 @@ class ToxoplasmaEngine:
     # TRADE RECORDING
     # ----------------------------------------------------------
 
-    def record_trade(self, strategy_id: str, trade: TradeRecord):
+    def record_trade(self, strategy_id: str, trade: TradeRecord,
+                     account_id: str = None):
         """
         Record a completed trade outcome for baseline calibration
         and infection detection.
+
+        Args:
+            strategy_id: Strategy identifier
+            trade: Completed trade record
+            account_id: Account key for DD tracking (e.g. "ATLAS").
+                         If None, uses strategy_id as fallback.
         """
         key = f"{strategy_id}|{trade.symbol}"
         if key not in self._trade_history:
@@ -1403,6 +1695,11 @@ class ToxoplasmaEngine:
 
         # Persist to DB
         self._save_trade(strategy_id, trade)
+
+        # Feed intraday DD tracker (fever response)
+        if self.dd_tracker is not None:
+            dd_account = account_id or strategy_id
+            self.dd_tracker.record_closed_trade(dd_account, trade.profit)
 
         # Track TE manipulation if we have an infection score
         infection = self._latest_scores.get(key)
@@ -1426,6 +1723,8 @@ class ToxoplasmaEngine:
         symbol: str,
         bars: np.ndarray,
         active_tes: List[str] = None,
+        account_id: str = None,
+        unrealized_pnl: float = 0.0,
     ) -> Dict:
         """
         Run a complete Toxoplasma diagnostic cycle for one strategy.
@@ -1435,9 +1734,11 @@ class ToxoplasmaEngine:
         Steps:
             1. Classify current market regime
             2. Compute dopamine state (volatility/volume excitement)
+            2b. Apply intraday DD suppression to dopamine (fever response)
             3. Ensure behavioral baseline is calibrated
             4. Score infection level
             5. Activate proportional countermeasures
+            5b. Apply DD override to countermeasures if needed
             6. Return full diagnostic for BRAIN script consumption
 
         Args:
@@ -1445,17 +1746,49 @@ class ToxoplasmaEngine:
             symbol: trading instrument
             bars: OHLCV numpy array (N x 5)
             active_tes: current TE activation names (optional, for tracking)
+            account_id: account key for DD tracking (e.g. "ATLAS").
+                         If None, uses strategy_id as fallback.
+            unrealized_pnl: current total unrealized P/L in dollars
+                             (optional, for DD tracking with unrealized losses)
 
         Returns:
             Dict with infection status, countermeasures, and diagnostics.
         """
         key = f"{strategy_id}|{symbol}"
+        dd_account = account_id or strategy_id
 
         # Step 1: Regime classification
         regime = self.regime_classifier.classify(bars)
 
-        # Step 2: Dopamine state
+        # Step 2: Dopamine state (from volatility/volume)
         dopamine = self.compute_dopamine(bars, symbol)
+
+        # Step 2b: Intraday DD suppression (fever response)
+        # When cumulative daily losses approach the DD ceiling, suppress
+        # dopamine proportionally. This is the organism's fever -- reducing
+        # activity when the body is being damaged.
+        dd_suppression = 1.0
+        dd_level = "normal"
+        dd_pct = 0.0
+        dd_closed_pnl = 0.0
+        dd_blocked = False
+        if self.dd_tracker is not None:
+            # Update unrealized P/L if provided
+            if unrealized_pnl != 0.0:
+                self.dd_tracker.update_unrealized_pnl(dd_account, unrealized_pnl)
+
+            dd_suppression = self.dd_tracker.get_dopamine_suppression(dd_account)
+            dd_state = self.dd_tracker.get_state(dd_account)
+            dd_level = dd_state.dd_level
+            dd_pct = dd_state.current_dd_pct
+            dd_closed_pnl = dd_state.cumulative_closed_pnl
+            dd_blocked = self.dd_tracker.is_trading_blocked(dd_account)
+
+            # Apply suppression: dopamine.current_level is reduced,
+            # which flows through to infection scoring (less dopamine = less
+            # amplification) but more importantly, we apply the suppression
+            # directly to position sizing and gating below.
+            dopamine.current_level = dopamine.current_level * dd_suppression
 
         # Step 3: Get or calibrate baseline
         baseline = self._baselines.get(key)
@@ -1492,8 +1825,28 @@ class ToxoplasmaEngine:
             trade_history, dopamine, regime,
         )
 
-        # Step 6: Countermeasures
+        # Step 6: Countermeasures (from infection)
         measures = self.activate_countermeasures(infection)
+
+        # Step 6b: DD override -- if DD tracker demands more restrictive
+        # measures than infection alone, apply the DD constraints on top.
+        # This ensures DD protection is ALWAYS respected even if infection
+        # score is low (e.g., healthy regime but accumulating small losses).
+        if self.dd_tracker is not None and dd_suppression < 1.0:
+            # DD suppression directly multiplies position_size_mult
+            dd_adjusted_size = measures.position_size_mult * dd_suppression
+            if dd_adjusted_size < measures.position_size_mult:
+                measures.position_size_mult = dd_adjusted_size
+                measures.active_measures.append(
+                    f"dd_{dd_level}_size_reduction"
+                )
+
+            if dd_blocked:
+                measures.strategy_pause = True
+                measures.position_size_mult = 0.0
+                measures.active_measures.append(
+                    "DD_CRITICAL_TRADING_BLOCKED"
+                )
 
         # Build result
         # NOTE: confidence_offset is ADDED to CONFIDENCE_THRESHOLD from config_loader
@@ -1507,6 +1860,8 @@ class ToxoplasmaEngine:
             "regime": regime.value,
             # Dopamine
             "dopamine_level": dopamine.current_level,
+            "dopamine_raw": dopamine.current_level / max(dd_suppression, 1e-10)
+                if dd_suppression < 1.0 else dopamine.current_level,
             "atr_ratio": dopamine.atr_ratio,
             "volume_ratio": dopamine.volume_ratio,
             # Infection
@@ -1533,16 +1888,32 @@ class ToxoplasmaEngine:
             "baseline_calibrated": baseline.calibration_valid,
             "baseline_trades": baseline.total_trades,
             "baseline_win_rate": baseline.baseline_win_rate,
+            # Intraday drawdown protection (fever response)
+            "dd_protection": {
+                "enabled": self.dd_tracker is not None,
+                "dd_level": dd_level,
+                "dd_pct": round(dd_pct, 1),
+                "dd_closed_pnl": round(dd_closed_pnl, 2),
+                "dd_suppression": round(dd_suppression, 3),
+                "dd_blocked": dd_blocked,
+            },
         }
 
+        dd_str = ""
+        if self.dd_tracker is not None and dd_suppression < 1.0:
+            dd_str = (
+                f" | DD={dd_level} ({dd_pct:.1f}%)"
+                f" supp={dd_suppression:.3f}"
+            )
         log.info(
             "[Toxoplasma] %s|%s: regime=%s infection=%.2f [%s] "
-            "dopamine=%.2f size_mult=%.2f conf_offset=%.3f%s",
+            "dopamine=%.2f size_mult=%.2f conf_offset=%.3f%s%s",
             strategy_id, symbol, regime.value,
             infection.infection_score, infection.infection_phase,
             dopamine.current_level,
             measures.position_size_mult, measures.confidence_offset,
             " INVERTED" if measures.signal_inversion else "",
+            dd_str,
         )
 
         return result
@@ -1591,6 +1962,37 @@ class ToxoplasmaEngine:
         key = f"{strategy_id}|{symbol}"
         return self._latest_countermeasures.get(key)
 
+    def feed_dd_closed_trade(self, account_id: str, profit: float):
+        """
+        Feed a closed trade P/L directly to the DD tracker without going
+        through the full record_trade pipeline.
+
+        Use this when the BRAIN script detects a closed trade via MT5 polling
+        and wants to update the DD tracker immediately.
+
+        Args:
+            account_id: Account key (e.g. "ATLAS")
+            profit: Realized P/L in dollars (negative = loss)
+        """
+        if self.dd_tracker is not None:
+            self.dd_tracker.record_closed_trade(account_id, profit)
+
+    def get_dd_state(self, account_id: str) -> Optional[Dict]:
+        """Get the current DD tracker state for an account."""
+        if self.dd_tracker is None:
+            return None
+        state = self.dd_tracker.get_state(account_id)
+        return {
+            "trading_day": state.trading_day,
+            "closed_pnl": state.cumulative_closed_pnl,
+            "unrealized_pnl": state.unrealized_pnl,
+            "closed_trades": state.closed_trade_count,
+            "dd_pct": round(state.current_dd_pct, 1),
+            "dd_level": state.dd_level,
+            "dopamine_suppression": round(state.dopamine_suppression, 3),
+            "dd_blocked": state.dd_level == DrawdownLevel.CRITICAL.value,
+        }
+
     def get_all_registered_strategies(self) -> List[str]:
         """Get all registered strategy|symbol keys."""
         return list(self._baselines.keys())
@@ -1623,6 +2025,9 @@ class ToxoplasmaEngine:
             "timestamp": datetime.now().isoformat(),
             "strategies": {},
             "manipulation_tools": len(self.get_manipulation_tools()),
+            "dd_protection": (
+                self.dd_tracker.get_summary() if self.dd_tracker else {}
+            ),
         }
         for key, baseline in self._baselines.items():
             infection = self._latest_scores.get(key)
@@ -1678,6 +2083,8 @@ class ToxoplasmaTEQABridge:
         symbol: str,
         bars: np.ndarray,
         active_tes: List[str] = None,
+        account_id: str = None,
+        unrealized_pnl: float = 0.0,
     ) -> Dict:
         """
         Compute Toxoplasma gate result for integration with Jardine's Gate.
@@ -1685,6 +2092,14 @@ class ToxoplasmaTEQABridge:
         This becomes a modifier gate in the extended gate system.
         Unlike binary pass/fail gates, Toxoplasma provides CONTINUOUS
         modulation of confidence and position sizing.
+
+        Args:
+            strategy_id: strategy identifier
+            symbol: trading instrument
+            bars: OHLCV data
+            active_tes: current TE activations
+            account_id: account key for DD tracking (e.g. "ATLAS")
+            unrealized_pnl: current total unrealized P/L in dollars
 
         Returns:
             {
@@ -1695,10 +2110,13 @@ class ToxoplasmaTEQABridge:
                 "infection_score": float,
                 "infection_phase": str,
                 "regime": str,
+                "dd_protection": dict,
             }
         """
         result = self.engine.run_cycle(
             strategy_id, symbol, bars, active_tes,
+            account_id=account_id,
+            unrealized_pnl=unrealized_pnl,
         )
 
         gate_pass = not result.get("strategy_pause", False)
@@ -1714,6 +2132,7 @@ class ToxoplasmaTEQABridge:
             "dopamine_level": result.get("dopamine_level", 0.0),
             "hold_time_mult": result.get("hold_time_mult", 1.0),
             "active_measures": result.get("active_measures", []),
+            "dd_protection": result.get("dd_protection", {}),
         }
 
     def apply_to_signal(
@@ -1724,13 +2143,15 @@ class ToxoplasmaTEQABridge:
         original_confidence: float,
         bars: np.ndarray,
         active_tes: List[str] = None,
+        account_id: str = None,
+        unrealized_pnl: float = 0.0,
     ) -> Tuple[int, float, float]:
         """
         Apply Toxoplasma modulation to a trading signal.
 
         This is the primary integration point for BRAIN scripts.
         It takes the raw signal and returns the modified version
-        after applying all countermeasures.
+        after applying all countermeasures including DD protection.
 
         Args:
             strategy_id: strategy identifier
@@ -1739,23 +2160,29 @@ class ToxoplasmaTEQABridge:
             original_confidence: raw confidence score
             bars: OHLCV data
             active_tes: current TE activations
+            account_id: account key for DD tracking (e.g. "ATLAS")
+            unrealized_pnl: current total unrealized P/L in dollars
 
         Returns:
             (modified_direction, modified_confidence, position_size_mult)
 
         Usage in BRAIN:
             direction, confidence, size_mult = bridge.apply_to_signal(
-                "teqa_main", "BTCUSD", signal_dir, signal_conf, bars, tes
+                "teqa_main", "BTCUSD", signal_dir, signal_conf, bars, tes,
+                account_id="ATLAS", unrealized_pnl=total_unrealized,
             )
             # confidence is already adjusted -- compare directly to CONFIDENCE_THRESHOLD
             # size_mult is applied to lot calculation
         """
         gate = self.get_toxoplasma_gate_result(
             strategy_id, symbol, bars, active_tes,
+            account_id=account_id,
+            unrealized_pnl=unrealized_pnl,
         )
 
         if not gate["gate_pass"]:
-            # Strategy paused -- return zero confidence to block trade
+            # Strategy paused (infection critical OR DD critical)
+            # Return zero confidence to block trade
             return 0, 0.0, 0.0
 
         modified_direction = original_direction
@@ -1789,6 +2216,8 @@ class ToxoplasmaTEQABridge:
         symbol: str,
         bars: np.ndarray,
         active_tes: List[str] = None,
+        account_id: str = None,
+        unrealized_pnl: float = 0.0,
     ):
         """
         Run a full cycle and write the result to the signal file.
@@ -1796,6 +2225,8 @@ class ToxoplasmaTEQABridge:
         """
         result = self.engine.run_cycle(
             strategy_id, symbol, bars, active_tes,
+            account_id=account_id,
+            unrealized_pnl=unrealized_pnl,
         )
         self.engine.write_signal_file(result, self.signal_file)
         return result

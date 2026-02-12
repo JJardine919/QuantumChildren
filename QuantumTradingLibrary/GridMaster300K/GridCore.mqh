@@ -321,6 +321,7 @@ double CGridManager::CalculateRegimeConfidence(void)
          break;
 
       case REGIME_NEUTRAL:
+         {
          // Neutral: Price near EMA200, EMAs converging
          double distFromEma200 = MathAbs(price - ema200) / ema200;
          double emaDiff = MathAbs(emaFast - emaSlow) / emaSlow;
@@ -338,6 +339,7 @@ double CGridManager::CalculateRegimeConfidence(void)
          // Apply compression boost
          confidence += (m_config.compressionBoost / 100.0);
          break;
+         }
    }
 
    return MathMin(confidence, 1.0);

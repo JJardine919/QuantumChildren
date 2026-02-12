@@ -1,6 +1,6 @@
 {
     "VERSION": "2.0 - SECURE (passwords moved to .env)",
-    "LAST_UPDATED": "2026-02-04",
+    "LAST_UPDATED": "2026-02-11",
 
     "TRADING_SETTINGS": {
         "MAX_LOSS_DOLLARS": 1.00,
@@ -17,7 +17,13 @@
         "CHECK_INTERVAL_SECONDS": 30,
         "ATR_MULTIPLIER": 0.0438,
         "REQUIRE_TRAINED_EXPERT": true,
-        "LSTM_MAX_AGE_DAYS": 7
+        "LSTM_MAX_AGE_DAYS": 7,
+        "SYMBOL_OVERRIDES": {
+            "ETHUSD": {
+                "MAX_LOSS_DOLLARS": 2.00,
+                "INITIAL_SL_DOLLARS": 1.20
+            }
+        }
     },
 
     "REGIME_DETECTION": {
@@ -66,7 +72,7 @@
             "terminal_path": null,
             "magic": 113001,
             "symbols": ["BTCUSD", "ETHUSD"],
-            "enabled": true
+            "enabled": false
         },
         "GL_2": {
             "account": 113328,
@@ -74,7 +80,7 @@
             "terminal_path": null,
             "magic": 113002,
             "symbols": ["BTCUSD", "ETHUSD"],
-            "enabled": true
+            "enabled": false
         },
         "GL_3": {
             "account": 107245,
@@ -94,6 +100,17 @@
         }
     },
 
+    "DRAWDOWN_PROTECTION": {
+        "ENABLED": true,
+        "DAILY_DD_LIMIT_DOLLARS": 175.00,
+        "DD_WARNING_THRESHOLD_PCT": 60,
+        "DD_CRITICAL_THRESHOLD_PCT": 80,
+        "WARNING_DOPAMINE_MULT": 0.50,
+        "CRITICAL_DOPAMINE_MULT": 0.05,
+        "RESET_HOUR_UTC": 0,
+        "INCLUDE_UNREALIZED_PNL": false
+    },
+
     "COLLECTION_SERVER": {
         "url": "http://203.161.61.61:8888",
         "enabled": false,
@@ -106,6 +123,8 @@
         "Use credential_manager.py to load credentials",
         "This file controls ALL trading scripts",
         "Edit values here - they apply everywhere",
-        "DO NOT hardcode values in Python scripts"
+        "DO NOT hardcode values in Python scripts",
+        "DRAWDOWN_PROTECTION added 2026-02-11: Toxoplasma intraday DD throttle",
+        "DD_WARNING at 60% of limit halves dopamine/sizing, DD_CRITICAL at 80% blocks new trades"
     ]
 }
