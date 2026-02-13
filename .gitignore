@@ -156,3 +156,7 @@ QuantumTradingLibrary/quantum_radar.html
 
 # ETARE backup files
 QuantumTradingLibrary/ETARE_QuantumFusion/models/*_backup_*.json
+
+# Files containing secrets (caught by GitHub push protection)
+DISTRIBUTION/patoRxouxJLqU0zwS.1b5283202e69c39af.txt
+DISTRIBUTION/import { createClient } from 'npm@b.txt
