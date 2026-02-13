@@ -10,7 +10,7 @@
         "DYNAMIC_TP_PERCENT": 50,
         "SET_DYNAMIC_TP": true,
         "ROLLING_SL_ENABLED": true,
-        "CONFIDENCE_THRESHOLD": 0.70,
+        "CONFIDENCE_THRESHOLD": 0.55,
         "AGENT_SL_MIN": 0.50,
         "AGENT_SL_MAX": 1.00,
         "WATCHDOG_LIMIT": 1.00,
@@ -18,6 +18,7 @@
         "ATR_MULTIPLIER": 0.0438,
         "REQUIRE_TRAINED_EXPERT": true,
         "LSTM_MAX_AGE_DAYS": 7,
+        "SOFTMAX_TEMPERATURE": 0.35,
         "SYMBOL_OVERRIDES": {
             "ETHUSD": {
                 "MAX_LOSS_DOLLARS": 2.00,
@@ -85,7 +86,7 @@
         "GL_3": {
             "account": 107245,
             "server": "GetLeveraged-Trade",
-            "terminal_path": null,
+            "terminal_path": "C:\\Program Files\\GetLeveraged MT5 Terminal\\terminal64.exe",
             "magic": 107001,
             "symbols": ["BTCUSD", "ETHUSD"],
             "enabled": true

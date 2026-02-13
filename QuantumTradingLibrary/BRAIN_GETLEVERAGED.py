@@ -1,16 +1,9 @@
 """
-QUANTUM BRAIN - GETLEVERAGED DEDICATED
+QUANTUM BRAIN - GETLEVERAGED GL_3 ONLY
 =======================================
-ONE script per account. Run separate instances:
+DEDICATED to account 107245 (GL_3). No other accounts.
 
-  python BRAIN_GETLEVERAGED.py --account GL_1
-  python BRAIN_GETLEVERAGED.py --account GL_2
-  python BRAIN_GETLEVERAGED.py --account GL_3
-
-Accounts:
-  GL_1 = 113326
-  GL_2 = 113328
-  GL_3 = 107245
+Run: python BRAIN_GETLEVERAGED.py
 
 Author: DooDoo + Claude
 Date: 2026-01-30
@@ -21,7 +14,6 @@ import os
 import json
 import time
 import logging
-import argparse
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -54,6 +46,7 @@ from config_loader import (
     CHECK_INTERVAL_SECONDS,
     LSTM_MAX_AGE_DAYS,
     AGENT_SL_MIN,
+    SOFTMAX_TEMPERATURE,
 )
 
 # Secure credential loading (H-1: no plaintext passwords)
@@ -157,6 +150,34 @@ class LSTMModel(nn.Module):
         return out
 
 
+class Conv1DModel(nn.Module):
+    """GPU-compatible Conv1D model (DirectML). Same interface as LSTMModel."""
+    def __init__(self, input_size=8, hidden_size=128, output_size=3):
+        super().__init__()
+        import torch.nn.functional as F
+        self.conv1 = nn.Conv1d(input_size, 64, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.conv2 = nn.Conv1d(64, hidden_size, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm1d(hidden_size)
+        self.conv3 = nn.Conv1d(hidden_size, hidden_size, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm1d(hidden_size)
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.dropout = nn.Dropout(0.2)
+        self.fc = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        import torch.nn.functional as F
+        if len(x.shape) == 2:
+            x = x.unsqueeze(1)
+        x = x.transpose(1, 2)
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = self.pool(x).squeeze(-1)
+        x = self.dropout(x)
+        return self.fc(x)
+
+
 # ============================================================
 # REGIME DETECTOR (Compression-based)
 # ============================================================
@@ -248,19 +269,32 @@ class ExpertLoader:
         self._check_model_staleness(expert_path)
 
         try:
-            model = LSTMModel(
-                input_size=expert_info['input_size'],
-                hidden_size=expert_info['hidden_size'],
-                output_size=3,
-                num_layers=2
-            )
+            model_type = expert_info.get('model_type', 'lstm')
+            input_size = expert_info['input_size']
+            hidden_size = expert_info['hidden_size']
+
+            if model_type == 'conv1d':
+                model = Conv1DModel(
+                    input_size=input_size,
+                    hidden_size=hidden_size,
+                    output_size=3,
+                )
+                logging.info(f"Loading Conv1D expert: {filename}")
+            else:
+                model = LSTMModel(
+                    input_size=input_size,
+                    hidden_size=hidden_size,
+                    output_size=3,
+                    num_layers=2
+                )
+
             state_dict = torch.load(str(expert_path), map_location='cpu', weights_only=False)
             model.load_state_dict(state_dict)
             model.eval()
             self.loaded_experts[filename] = model
             return model
         except Exception as e:
-            logging.error(f"Failed to load expert: {e}")
+            logging.error(f"Failed to load expert {filename}: {e}")
             return None
 
 
@@ -435,7 +469,10 @@ class AccountTrader:
 
         with torch.no_grad():
             output = expert(sequence_tensor)
-            probs = torch.softmax(output, dim=1)
+            # Temperature scaling: sharpen 3-class softmax for 0.70 threshold
+            # T < 1.0 makes predictions more decisive (0.58 @ T=1 → ~0.76 @ T=0.5)
+            temp = SOFTMAX_TEMPERATURE if SOFTMAX_TEMPERATURE > 0 else 1.0
+            probs = torch.softmax(output / temp, dim=1)
             action_idx = torch.argmax(probs).item()
             confidence = probs[0, action_idx].item()
 
@@ -795,15 +832,9 @@ class AccountTrader:
 # MAIN BRAIN
 # ============================================================
 
-VALID_ACCOUNTS = ['GL_1', 'GL_2', 'GL_3']
-
-
-def run_single_account(account_key: str):
-    """Run brain for ONE account only. Never cycles. Never re-logins."""
-    if account_key not in VALID_ACCOUNTS:
-        logging.error(f"Unknown account: {account_key}")
-        logging.error(f"Valid accounts: {', '.join(VALID_ACCOUNTS)}")
-        sys.exit(1)
+def run_single_account():
+    """Run brain for GL_3 ONLY. Never cycles. Never re-logins."""
+    account_key = 'GL_3'
 
     # H-1: Load credentials securely
     try:
@@ -875,16 +906,4 @@ def run_single_account(account_key: str):
 # ============================================================
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description='GetLeveraged Quantum Brain — ONE account per instance',
-        epilog='Run 3 separate windows:\n'
-               '  python BRAIN_GETLEVERAGED.py --account GL_1\n'
-               '  python BRAIN_GETLEVERAGED.py --account GL_2\n'
-               '  python BRAIN_GETLEVERAGED.py --account GL_3',
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument('--account', required=True, choices=['GL_1', 'GL_2', 'GL_3'],
-                        help='Which GetLeveraged account to trade')
-    args = parser.parse_args()
-
-    run_single_account(args.account)
+    run_single_account()

@@ -94,24 +94,22 @@ If this returns any lines with `= number`, those are bugs.
 
 | Key | Account | Name | Terminal |
 |-----|---------|------|----------|
+| GL_3 | 107245 | GetLeveraged (ACTIVE) | GetLeveraged MT5 Terminal |
+| JIMMY_FTMO | 1512556097 | Jimmy's FTMO Challenge | FTMO Global Markets MT5 Terminal |
 | BG_INSTANT | 366604 | BlueGuardian $5K Instant | Blue Guardian MT5 Terminal |
 | BG_CHALLENGE | 365060 | BlueGuardian $100K Challenge | Blue Guardian MT5 Terminal 2 |
 | ATLAS | 212000584 | Atlas Funded | Atlas Funded MT5 Terminal |
-| GL_1 | 113326 | GetLeveraged #1 | GetLeveraged MT5 |
-| GL_2 | 113328 | GetLeveraged #2 | GetLeveraged MT5 |
-| GL_3 | 107245 | GetLeveraged #3 | GetLeveraged MT5 |
-| FTMO | 1521063483 | FTMO Challenge | FTMO-Demo2 (81A933A9AFC5DE3C23B15CAB19C63850) |
 
 ---
 
 ## SCRIPTS
 
 ### For Trading (run each in separate window):
+- `BRAIN_GETLEVERAGED.py` → GL_3 (107245) ONLY — currently active
+- `BRAIN_JIMMY_FTMO.py` → Jimmy's FTMO (1512556097) — via SOCKS5 proxy on VPS_2
 - `BRAIN_BG_INSTANT.py` → 366604 only
 - `BRAIN_BG_CHALLENGE.py` → 365060 only
 - `BRAIN_ATLAS.py` → 212000584 only
-- `BRAIN_GETLEVERAGED.py` → GetLeveraged accounts
-- `BRAIN_FTMO.py` → 1521063483 only
 
 ### For Monitoring (read-only):
 - `DASHBOARD_MONITOR.py` → Shows all accounts without affecting trades
@@ -188,6 +186,45 @@ python prelaunch_validator.py --bypass          # Warn but don't block
 3. ❌ Do NOT switch accounts within a running script
 4. ❌ Do NOT change MASTER_CONFIG.json values without asking
 5. ❌ Do NOT create scripts that manage multiple accounts in one loop
+6. ❌ Do NOT push directly to main -- use a feature branch (see GIT WORKFLOW below)
+
+---
+
+## GIT WORKFLOW -- MANDATORY
+
+**`main` is production. BRAIN scripts run from main. Never push untested code to main.**
+
+### For every change:
+
+```bash
+# 1. Create a feature branch BEFORE writing any code
+git checkout -b feature/short-description-here
+
+# 2. Do your work, commit as needed
+git add <files>
+git commit -m "description"
+
+# 3. Push the branch (NOT main)
+git push -u origin feature/short-description-here
+
+# 4. Test and verify everything works
+
+# 5. Only after testing: merge to main
+git checkout main
+git pull
+git merge feature/short-description-here
+git push
+
+# 6. Clean up
+git branch -d feature/short-description-here
+```
+
+### Rules:
+- **NEVER** `git push` while on main without merging a tested branch
+- **NEVER** `git push --force` to main
+- **ASK** the user before merging to main
+- Branch names: `feature/thing`, `fix/thing`, or `experiment/thing`
+- If the user says "commit this" or "push this", create a branch first and confirm before merging to main
 
 ---
 

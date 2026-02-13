@@ -64,26 +64,10 @@ ACCOUNT_METADATA = {
         "symbols": ["BTCUSD", "ETHUSD", "XAUUSD"],
         "env_key": "ATLAS_PASSWORD"
     },
-    "GL_1": {
-        "account": 113326,
-        "server": "GetLeveraged-Trade",
-        "terminal_path": None,
-        "magic": 113001,
-        "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
-        "env_key": "GL_1_PASSWORD"
-    },
-    "GL_2": {
-        "account": 113328,
-        "server": "GetLeveraged-Trade",
-        "terminal_path": None,
-        "magic": 113002,
-        "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
-        "env_key": "GL_2_PASSWORD"
-    },
     "GL_3": {
         "account": 107245,
         "server": "GetLeveraged-Trade",
-        "terminal_path": None,
+        "terminal_path": r"C:\Program Files\GetLeveraged MT5 Terminal\terminal64.exe",
         "magic": 107001,
         "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
         "env_key": "GL_3_PASSWORD"
@@ -104,13 +88,13 @@ ACCOUNT_METADATA = {
         "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
         "env_key": "QNIF_FTMO_PASSWORD"
     },
-    "QNIF_GL_3": {
-        "account": 107245,
-        "server": "GetLeveraged-Trade",
-        "terminal_path": None,
-        "magic": 107002,
+    "JIMMY_FTMO": {
+        "account": 1512556097,
+        "server": "FTMO-Demo",
+        "terminal_path": r"C:\Program Files\FTMO Global Markets MT5 Terminal\terminal64.exe",
+        "magic": 151201,
         "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
-        "env_key": "QNIF_GL_3_PASSWORD"
+        "env_key": "JIMMY_FTMO_PASSWORD"
     }
 }
 

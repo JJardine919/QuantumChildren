@@ -143,7 +143,9 @@ def validate_prelaunch(
         for symbol in symbols:
             exists, info = check_expert_exists(symbol)
             if exists:
-                print(f"    [OK] {symbol}: Expert found (fitness={info['fitness']:.4f})")
+                score = info.get('fitness') or info.get('win_rate', 0)
+                label = 'fitness' if 'fitness' in info else 'WR'
+                print(f"    [OK] {symbol}: Expert found ({label}={score:.4f})")
             else:
                 print(f"    [FAIL] {symbol}: No trained expert found!")
                 all_passed = False

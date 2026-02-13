@@ -53,18 +53,32 @@ class LSTMModel(nn.Module):
 
 
 def get_data(symbol='BTCUSD', bars=30000):
-    try:
-        import MetaTrader5 as mt5
-        if mt5.initialize():
-            rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 0, bars)
-            mt5.shutdown()
-            if rates is not None and len(rates) > 0:
-                df = pd.DataFrame(rates)
-                df['time'] = pd.to_datetime(df['time'], unit='s')
-                print(f"  Got {len(df):,} bars from MT5 ({symbol})")
-                return df
-    except:
-        pass
+    import MetaTrader5 as mt5
+    # Try GetLeveraged terminal first, then fallback to default
+    terminal_paths = [
+        r"C:\Program Files\GetLeveraged MT5 Terminal\terminal64.exe",
+        r"C:\Program Files\MetaTrader 5\terminal64.exe",
+        None,  # default
+    ]
+    for path in terminal_paths:
+        try:
+            if path:
+                ok = mt5.initialize(path=path)
+            else:
+                ok = mt5.initialize()
+            if ok:
+                rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 0, bars)
+                mt5.shutdown()
+                if rates is not None and len(rates) > 0:
+                    df = pd.DataFrame(rates)
+                    df['time'] = pd.to_datetime(df['time'], unit='s')
+                    print(f"  Got {len(df):,} bars from MT5 ({symbol}) via {path or 'default'}")
+                    return df
+            else:
+                err = mt5.last_error()
+                print(f"  MT5 init failed for {path or 'default'}: {err}")
+        except Exception as e:
+            print(f"  MT5 error for {path or 'default'}: {e}")
     raise RuntimeError(f"Could not get data for {symbol}")
 
 
