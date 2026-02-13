@@ -230,6 +230,10 @@ def build_signal_json(result: dict) -> dict:
             "suppression": "",
         }),
 
+        # --- v3.3 session + focused circuit fields ---
+        "session": result.get("session", {"hour_utc": 0, "session_name": "UNKNOWN"}),
+        "focused_circuit": result.get("focused_circuit", {"enabled": False}),
+
         "timestamp": result.get("timestamp", datetime.now().isoformat()),
         "version": result.get("version", "TEQA-3.0-NEURAL-TE"),
         "symbol": result.get("symbol", "UNKNOWN"),
@@ -324,10 +328,28 @@ def run_once(engine: TEQAv3Engine, fetcher: MT5DataFetcher,
                            f"acc={stats['avg_accuracy']:.0%} "
                            f"uniq={stats['unique_genomes']}/{stats['n_neurons']}")
 
+        # Focused circuit comparison info
+        fc_info = ""
+        fc = result.get("focused_circuit", {})
+        if fc and "n_active_qubits" in fc:
+            fc_dir = "L" if fc.get("focused_direction") == 1 else (
+                "S" if fc.get("focused_direction") == -1 else "N")
+            fc_conf = fc.get("focused_confidence", 0)
+            dc_dir = "L" if fc.get("dormant_direction") == 1 else (
+                "S" if fc.get("dormant_direction") == -1 else "N")
+            dc_conf = fc.get("dormant_confidence", 0)
+            contrarian = " CONTRARIAN!" if fc.get("contrarian_alert") else ""
+            fc_info = (f" | focused={fc_dir}@{fc_conf:.0%}({fc.get('n_active_qubits',0)}q) "
+                       f"dormant={dc_dir}@{dc_conf:.0%}({fc.get('n_dormant_qubits',0)}q){contrarian}")
+
+        # Session info
+        sess = result.get("session", {})
+        sess_info = f" | {sess.get('session_name', '?')}" if sess.get("session_name") else ""
+
         logger.info(
             f"Signal: {direction} {conf:.1%} | shock={shock} | "
             f"consensus={consensus:.1%} | gates={'PASS' if all_gates_pass else 'FAIL'} | "
-            f"{result.get('elapsed_ms', 0):.0f}ms{evo_info}"
+            f"{result.get('elapsed_ms', 0):.0f}ms{evo_info}{sess_info}{fc_info}"
         )
 
         return True
@@ -387,6 +409,8 @@ def main():
     parser.add_argument('--neurons', type=int, default=7, help='Neural mosaic population size (default: 7)')
     parser.add_argument('--shots', type=int, default=8192, help='Quantum shots (default: 8192)')
     parser.add_argument('--once', action='store_true', help='Run once and exit')
+    parser.add_argument('--focused', action='store_true', default=True,
+                        help='Enable focused/dormant circuit comparison (default: enabled)')
     args = parser.parse_args()
 
     # Resolve symbol list: --symbols takes priority, --symbol is single-symbol alias

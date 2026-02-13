@@ -1497,6 +1497,30 @@ class TEQAv3Engine:
             except Exception as e:
                 log.warning("Failed to init neural evolution: %s", e)
 
+        # TE Session Logger (activation pattern tracking by session/hour)
+        self.session_logger = None
+        try:
+            from te_session_logger import TESessionLogger
+            self.session_logger = TESessionLogger(
+                db_path=str(Path(db_path).parent / "te_session_log.db") if db_path else None
+            )
+            log.info("TE Session Logger ENABLED")
+        except ImportError:
+            log.info("te_session_logger.py not found -- session logging disabled")
+        except Exception as e:
+            log.warning("Failed to init TE Session Logger: %s", e)
+
+        # Focused Quantum Circuit Engine (right-sized circuits)
+        self.focused_engine = None
+        try:
+            from focused_quantum_circuit import FocusedQuantumEngine
+            self.focused_engine = FocusedQuantumEngine(base_shots=shots)
+            log.info("Focused Quantum Engine ENABLED")
+        except ImportError:
+            log.info("focused_quantum_circuit.py not found -- focused circuits disabled")
+        except Exception as e:
+            log.warning("Failed to init Focused Quantum Engine: %s", e)
+
     def analyze(
         self,
         bars: np.ndarray,
@@ -1790,6 +1814,65 @@ class TEQAv3Engine:
             "te_activations": adjusted_activations,
             "neuron_results": neuron_results,
         }
+
+        # === Step 9B: Session Logging ===
+        if self.session_logger is not None:
+            try:
+                hour_utc = datetime.utcnow().hour
+                session_name = self.session_logger.get_session_name(hour_utc)
+                self.session_logger.log_activations(
+                    adjusted_activations, hour_utc, session_name,
+                    shock_label, symbol
+                )
+                result["session"] = {
+                    "hour_utc": hour_utc,
+                    "session_name": session_name,
+                }
+            except Exception as e:
+                log.warning("Session logging failed (non-fatal): %s", e)
+                hour_utc = datetime.utcnow().hour
+                session_name = "UNKNOWN"
+                result["session"] = {"hour_utc": hour_utc, "session_name": session_name}
+        else:
+            hour_utc = datetime.utcnow().hour
+            session_name = "UNKNOWN"
+            result["session"] = {"hour_utc": hour_utc, "session_name": session_name}
+
+        # === Step 9C: Focused Quantum Circuit (Active-Only vs Dormant) ===
+        if self.focused_engine is not None:
+            try:
+                focused_active = [a["te"] for a in adjusted_activations if a["strength"] > 0.3]
+                focused_dormant = [a["te"] for a in adjusted_activations if a["strength"] <= 0.3]
+
+                focused_result = self.focused_engine.run_focused(
+                    adjusted_activations, focused_active,
+                    self.mosaic.neurons, shock_score, self.shots
+                )
+                dormant_result = self.focused_engine.run_dormant(
+                    adjusted_activations, focused_dormant,
+                    self.mosaic.neurons, shock_score, self.shots
+                )
+
+                result["focused_circuit"] = {
+                    "n_active_qubits": len(focused_active),
+                    "n_dormant_qubits": len(focused_dormant),
+                    "active_tes": focused_active,
+                    "dormant_tes": focused_dormant,
+                    "focused_confidence": focused_result["confidence"],
+                    "focused_direction": focused_result["direction"],
+                    "dormant_confidence": dormant_result["confidence"],
+                    "dormant_direction": dormant_result["direction"],
+                    "agreement": focused_result["direction"] == dormant_result["direction"],
+                    "contrarian_alert": (
+                        dormant_result["direction"] != 0 and
+                        dormant_result["direction"] != focused_result["direction"]
+                    ),
+                }
+            except Exception as e:
+                log.warning("Focused circuit failed (non-fatal): %s", e)
+                result["focused_circuit"] = {"error": str(e)}
+        else:
+            result["focused_circuit"] = {"enabled": False}
 
         # === Step 10: Evolution data (if enabled) ===
         if self.evolution is not None:
