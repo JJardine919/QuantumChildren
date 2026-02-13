@@ -113,3 +113,46 @@ bidirec lstm/
 # Large archives
 QuantumChildren_70plus_archive.7z
 ETARE.zip
+
+# Runtime lock files
+QuantumTradingLibrary/.locks/
+
+# Collected market data (large CSV files from auto_data_collector)
+QuantumTradingLibrary/quantum_data/
+
+# Training and army output (generated, large)
+QuantumTradingLibrary/army_1500_output/
+QuantumTradingLibrary/signal_farm_output/
+QuantumTradingLibrary/state_snapshots/
+QuantumTradingLibrary/catboost_info/
+
+# Surrogate models and data (runtime)
+QuantumTradingLibrary/auger_surrogate_*.csv
+QuantumTradingLibrary/auger_surrogate_models/
+
+# Auto loop runtime state
+QuantumTradingLibrary/auto_loop_state.json
+
+# Temp JSON files
+QuantumTradingLibrary/tmp*.json
+
+# Generated signal files (written by Python bridges/QNIF, read by BRAIN)
+QuantumTradingLibrary/qnif_signal*.json
+QuantumTradingLibrary/testosterone_dmt_signal*.json
+QuantumTradingLibrary/stanozolol_dmt_signal*.json
+
+# Training runtime logs
+QuantumTradingLibrary/top_50_experts/army_configs/
+QuantumTradingLibrary/top_50_experts/training_log.json
+QuantumTradingLibrary/top_50_experts/gpu_training_log.json
+
+# QNIF runtime data
+QuantumTradingLibrary/QNIF/HistoricalData/
+QuantumTradingLibrary/QNIF/sim_results/
+
+# Generated HTML dashboards
+QuantumTradingLibrary/pattern_energy.html
+QuantumTradingLibrary/quantum_radar.html
+
+# ETARE backup files
+QuantumTradingLibrary/ETARE_QuantumFusion/models/*_backup_*.json
