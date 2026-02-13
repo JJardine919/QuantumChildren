@@ -1,0 +1,75 @@
+{
+    "VERSION": "1.0 - Auto Training Loop",
+    "CREATED": "2026-02-12",
+    "DESCRIPTION": "Configuration for the autonomous training/feeding pipeline",
+
+    "SCHEDULE": {
+        "DATA_COLLECTION_INTERVAL_HOURS": 4,
+        "SIGNAL_FARM_INTERVAL_HOURS": 6,
+        "LSTM_RETRAIN_INTERVAL_HOURS": 12,
+        "EXPERT_ROTATION_INTERVAL_HOURS": 24,
+        "QNIF_SIM_INTERVAL_HOURS": 24,
+        "TE_FEEDING_INTERVAL_MINUTES": 30,
+        "HEALTH_CHECK_INTERVAL_MINUTES": 15,
+        "NOTES": [
+            "All intervals are MINIMUM gaps between runs",
+            "If a previous run is still active, the next run is skipped",
+            "TE feeding runs most frequently because it is lightweight"
+        ]
+    },
+
+    "SYMBOLS": ["BTCUSD", "ETHUSD", "XAUUSD"],
+
+    "EXPERT_ROTATION": {
+        "MAX_AGE_DAYS": 7,
+        "MIN_EXPERTS_BEFORE_ROTATION": 5,
+        "ARCHIVE_OLD_EXPERTS": true,
+        "ARCHIVE_DIR": "expert_archive"
+    },
+
+    "GPU_THROTTLE": {
+        "TRAINING_PROCESS_PRIORITY": "BELOW_NORMAL",
+        "MAX_GPU_MEMORY_PCT": 70,
+        "YIELD_TO_BRAIN_SECONDS": 2,
+        "NOTES": [
+            "BRAIN uses GPU for inference (fast, small bursts)",
+            "Training uses GPU for batch tensor ops (longer, larger)",
+            "We yield between batches so BRAIN inference is never starved"
+        ]
+    },
+
+    "RETRY": {
+        "MAX_RETRIES": 3,
+        "RETRY_DELAY_SECONDS": 60,
+        "BACKOFF_MULTIPLIER": 2.0
+    },
+
+    "LOGGING": {
+        "LOG_DIR": "orchestrator_logs",
+        "MAX_LOG_FILES": 30,
+        "LOG_LEVEL": "INFO",
+        "ROTATE_LOGS_DAILY": true
+    },
+
+    "SAFETY": {
+        "NEVER_MODIFY_BRAIN_SCRIPTS": true,
+        "NEVER_MODIFY_MASTER_CONFIG": true,
+        "NEVER_CLOSE_POSITIONS": true,
+        "HALT_ON_CRITICAL_ERROR": false,
+        "MAX_CONSECUTIVE_FAILURES": 10,
+        "WATCHDOG_PROCESS_NAMES": [
+            "BRAIN_ATLAS",
+            "BRAIN_BG_INSTANT",
+            "BRAIN_BG_CHALLENGE",
+            "BRAIN_FTMO",
+            "BRAIN_GETLEVERAGED",
+            "STOPLOSS_WATCHDOG",
+            "quantum_server"
+        ],
+        "NOTES": [
+            "RULE #1: DO NOT TOUCH THE LIVE TRADING SYSTEM",
+            "The BRAIN self-regulates. We never modify it.",
+            "Only shutdown if runaway. This is non-negotiable."
+        ]
+    }
+}
