@@ -44,9 +44,17 @@ from config_loader import (
     ATR_MULTIPLIER,
     CHECK_INTERVAL_SECONDS as CHECK_INTERVAL,
     CONFIDENCE_THRESHOLD,
+    AGENT_SL_MIN,
 )
 
 from credential_manager import get_credentials, CredentialError
+
+# TEQA quantum signal bridge (for growth amplifier addon)
+try:
+    from teqa_bridge import TEQABridge
+    TEQA_ENABLED = True
+except ImportError:
+    TEQA_ENABLED = False
 
 # ============================================================
 # ANTHROPIC SDK
@@ -594,6 +602,61 @@ def manage_positions():
 
 
 # ============================================================
+# GROWTH AMPLIFIER: LIPOLYSIS (SL tightening on losers)
+# ============================================================
+
+def apply_lipolysis(symbol: str, tighten_factor: float):
+    """Tighten SL on losing positions (growth amplifier lipolysis).
+    Only tightens, never loosens. Respects AGENT_SL_MIN."""
+    positions = mt5.positions_get(symbol=symbol)
+    if not positions:
+        return
+    for pos in positions:
+        if pos.magic != ACCOUNT['magic_number']:
+            continue
+        if pos.profit >= 0:
+            continue
+        if pos.sl == 0.0:
+            continue
+        symbol_info = mt5.symbol_info(symbol)
+        if symbol_info is None:
+            continue
+        tick_size = symbol_info.trade_tick_size
+        tick_value = symbol_info.trade_tick_value
+        current_sl_dist = abs(pos.price_open - pos.sl)
+        new_sl_dist = current_sl_dist * tighten_factor
+        if tick_value > 0 and pos.volume > 0:
+            min_sl_dist = AGENT_SL_MIN / (tick_value * pos.volume) * tick_size
+        else:
+            min_sl_dist = 0
+        new_sl_dist = max(new_sl_dist, min_sl_dist)
+        if new_sl_dist >= current_sl_dist:
+            continue
+        digits = symbol_info.digits
+        if pos.type == 0:
+            new_sl = round(pos.price_open - new_sl_dist, digits)
+        else:
+            new_sl = round(pos.price_open + new_sl_dist, digits)
+        try:
+            request = {
+                "action": mt5.TRADE_ACTION_SLTP,
+                "symbol": symbol,
+                "position": pos.ticket,
+                "sl": new_sl,
+                "tp": pos.tp,
+            }
+            result = mt5.order_send(request)
+            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                logging.info(
+                    f"[BG_LLM][{symbol}] LIPOLYSIS: "
+                    f"tightened SL on #{pos.ticket} "
+                    f"{current_sl_dist:.5f} -> {new_sl_dist:.5f} "
+                    f"({(1-tighten_factor)*100:.1f}% tighter)")
+        except Exception as e:
+            logging.debug(f"[BG_LLM] Lipolysis error: {e}")
+
+
+# ============================================================
 # TRADE JOURNAL (local JSON log of every decision)
 # ============================================================
 
@@ -632,6 +695,7 @@ class LLMTrader:
         self.cycle_count = 0
         self.trades_today = 0
         self.holds_today = 0
+        self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
 
     def connect(self) -> bool:
         if self.connected:
@@ -700,6 +764,30 @@ class LLMTrader:
                 executed = execute_trade(symbol, action, confidence, reasoning)
                 if executed:
                     self.trades_today += 1
+
+            # Growth Amplifier: Hyperplasia (second position on strong growth)
+            if executed and self.teqa_bridge is not None:
+                try:
+                    signal = self.teqa_bridge.read_signal(symbol=symbol)
+                    if signal and signal.growth_active and signal.growth_hyperplasia:
+                        ratio = signal.growth_second_lot_ratio
+                        if ratio > 0:
+                            execute_trade(symbol, action, confidence, f"HYPERPLASIA: {reasoning}")
+                            logging.info(
+                                f"[BG_LLM][{symbol}] GROWTH: hyperplasia={ratio:.0%} lot "
+                                f"| signal={signal.growth_signal:.3f} "
+                                f"| variant={signal.growth_variant}")
+                except Exception as ge:
+                    logging.debug(f"[BG_LLM] Growth hyperplasia check: {ge}")
+
+            # Growth Amplifier: Lipolysis (tighten SL on losing positions)
+            if self.teqa_bridge is not None:
+                try:
+                    signal = self.teqa_bridge.read_signal(symbol=symbol)
+                    if signal and signal.growth_active and signal.growth_lipolysis_factor < 1.0:
+                        apply_lipolysis(symbol, signal.growth_lipolysis_factor)
+                except Exception as le:
+                    logging.debug(f"[BG_LLM] Growth lipolysis check: {le}")
 
             log_decision(snapshot, action, confidence, reasoning, executed)
 

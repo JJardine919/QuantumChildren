@@ -1808,6 +1808,97 @@ class TEQAv3Engine:
         else:
             result["evolution"] = {"enabled": False}
 
+        # === Step 11: Stanozolol-DMT TE Bridge (OPTIONAL EXTENSION) ===
+        # 11-layer / 13-gate / 5-channel / 16-qubit power layer.
+        # Runs AFTER the normal pipeline and can boost or suppress confidence.
+        # If stanozolol_dmt_bridge.py does not exist, this is silently skipped.
+        try:
+            from stanozolol_dmt_bridge import apply_bridge
+            result = apply_bridge(result)
+            log.info("Stanozolol-DMT Bridge: applied (conf=%.4f)", result["confidence"])
+        except ImportError:
+            pass  # Bridge not installed -- TEQA works fine without it
+        except Exception as e:
+            log.warning("Stanozolol-DMT Bridge failed (non-fatal): %s", e)
+
+        # === Step 12: Testosterone-DMT TE Bridge (OPTIONAL EXTENSION #2) ===
+        # 4-layer / 4-gate / 5-channel / 8-qubit AGGRESSIVE power layer.
+        # Testosterone: raw power, trend-following, wider stops, bigger targets.
+        # Stanozolol: precision, scalping, tight execution.
+        # The BRAIN can choose which molecular extension to use (or none).
+        try:
+            from testosterone_dmt_bridge import create_bridge
+            testosterone_bridge = create_bridge(shots=4096)
+
+            # Prepare market data for testosterone processing
+            market_data_for_testosterone = {
+                'close': bars[:, 3].tolist() if bars.ndim == 2 else bars.tolist(),
+                'volume': bars[:, 4].tolist() if bars.ndim == 2 and bars.shape[1] >= 5 else [],
+                'volatility': signals.get('volatility', 1.0),
+                'drawdown': drawdown,
+            }
+
+            # Base signal from TEQA (normalized to -1 to +1)
+            base_signal = direction * confidence
+
+            # Immune conflict (CRISPR/VDJ conflicts would be calculated here)
+            # For now, use genomic shock as proxy
+            immune_conflict = min(1.0, shock_score / 3.0)
+
+            # Process through testosterone bridge
+            testosterone_result = testosterone_bridge.process_signal(
+                market_data=market_data_for_testosterone,
+                base_signal=base_signal,
+                immune_conflict=immune_conflict
+            )
+
+            # Apply testosterone decision
+            if testosterone_result['action'] == 'boost':
+                # Boost confidence and apply aggressive parameters
+                original_confidence = confidence
+                confidence = min(1.0, confidence * (1 + testosterone_result['strength'] * 0.5))
+                result['testosterone_boost'] = testosterone_result['strength']
+                result['testosterone_regime'] = testosterone_result['regime']
+                result['testosterone_position_mult'] = testosterone_result['position_multiplier']
+                result['testosterone_stop_mult'] = testosterone_result['stop_multiplier']
+                result['testosterone_target_mult'] = testosterone_result['target_multiplier']
+                log.info("Testosterone-DMT Bridge: BOOST applied (%.4f → %.4f), regime=%s",
+                        original_confidence, confidence, testosterone_result['regime'])
+            elif testosterone_result['action'] == 'suppress':
+                # Suppress confidence
+                original_confidence = confidence
+                confidence = confidence * 0.7
+                result['testosterone_suppress'] = True
+                result['testosterone_regime'] = testosterone_result['regime']
+                log.info("Testosterone-DMT Bridge: SUPPRESS applied (%.4f → %.4f), regime=%s",
+                        original_confidence, confidence, testosterone_result['regime'])
+            else:
+                # Neutral - no change
+                result['testosterone_neutral'] = True
+                result['testosterone_regime'] = testosterone_result['regime']
+                log.debug("Testosterone-DMT Bridge: NEUTRAL (no change)")
+
+            # Store full testosterone result for analytics
+            result['testosterone_dmt'] = {
+                'action': testosterone_result['action'],
+                'strength': testosterone_result['strength'],
+                'regime': testosterone_result['regime'],
+                'gates_passed': testosterone_result['gates']['all_gates_passed'],
+                'gates_count': f"{testosterone_result['gates']['gates_passed_count']}/4",
+                'position_multiplier': testosterone_result['position_multiplier'],
+                'stop_multiplier': testosterone_result['stop_multiplier'],
+                'target_multiplier': testosterone_result['target_multiplier'],
+                'processing_time_ms': testosterone_result['processing_time_ms'],
+            }
+
+            # Update confidence in result dict after testosterone modification
+            result['confidence'] = confidence
+
+        except ImportError:
+            pass  # Testosterone bridge not installed -- TEQA works fine without it
+        except Exception as e:
+            log.warning("Testosterone-DMT Bridge failed (non-fatal): %s", e)
+
         # Save analytics
         if save_analytics:
             self._save_analytics(result)

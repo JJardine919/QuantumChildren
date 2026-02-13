@@ -53,6 +53,7 @@ from config_loader import (
     CONFIDENCE_THRESHOLD,
     CHECK_INTERVAL_SECONDS,
     LSTM_MAX_AGE_DAYS,
+    AGENT_SL_MIN,
 )
 
 # Secure credential loading (H-1: no plaintext passwords)
@@ -453,6 +454,57 @@ class AccountTrader:
                     return True
         return False
 
+    def _apply_lipolysis(self, symbol: str, tighten_factor: float):
+        """Tighten SL on losing positions (growth amplifier lipolysis).
+        Only tightens, never loosens. Respects AGENT_SL_MIN."""
+        positions = mt5.positions_get(symbol=symbol)
+        if not positions:
+            return
+        magic = self.account_config['magic_number']
+        for pos in positions:
+            if pos.magic != magic:
+                continue
+            if pos.profit >= 0:
+                continue
+            if pos.sl == 0.0:
+                continue
+            symbol_info = mt5.symbol_info(symbol)
+            if symbol_info is None:
+                continue
+            tick_size = symbol_info.trade_tick_size
+            tick_value = symbol_info.trade_tick_value
+            current_sl_dist = abs(pos.price_open - pos.sl)
+            new_sl_dist = current_sl_dist * tighten_factor
+            if tick_value > 0 and pos.volume > 0:
+                min_sl_dist = AGENT_SL_MIN / (tick_value * pos.volume) * tick_size
+            else:
+                min_sl_dist = 0
+            new_sl_dist = max(new_sl_dist, min_sl_dist)
+            if new_sl_dist >= current_sl_dist:
+                continue
+            digits = symbol_info.digits
+            if pos.type == 0:
+                new_sl = round(pos.price_open - new_sl_dist, digits)
+            else:
+                new_sl = round(pos.price_open + new_sl_dist, digits)
+            try:
+                request = {
+                    "action": mt5.TRADE_ACTION_SLTP,
+                    "symbol": symbol,
+                    "position": pos.ticket,
+                    "sl": new_sl,
+                    "tp": pos.tp,
+                }
+                result = mt5.order_send(request)
+                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    logging.info(
+                        f"[{self.account_key}][{symbol}] LIPOLYSIS: "
+                        f"tightened SL on #{pos.ticket} "
+                        f"{current_sl_dist:.5f} -> {new_sl_dist:.5f} "
+                        f"({(1-tighten_factor)*100:.1f}% tighter)")
+            except Exception as e:
+                logging.debug(f"[{self.account_key}] Lipolysis error: {e}")
+
     def execute_trade(self, symbol: str, action: Action, confidence: float) -> bool:
         if action not in [Action.BUY, Action.SELL]:
             return False
@@ -683,12 +735,39 @@ class AccountTrader:
             if regime == Regime.CLEAN and action in [Action.BUY, Action.SELL]:
                 trade_executed = self.execute_trade(symbol, action, confidence)
 
+            # Growth Amplifier: Hyperplasia (second position on strong growth)
+            growth_reason = ""
+            if trade_executed and self.teqa_bridge is not None:
+                try:
+                    signal = self.teqa_bridge.read_signal(symbol=symbol)
+                    if signal and signal.growth_active and signal.growth_hyperplasia:
+                        ratio = signal.growth_second_lot_ratio
+                        if ratio > 0:
+                            self.execute_trade(symbol, action, confidence)
+                            growth_reason = (
+                                f"GROWTH: hyperplasia={ratio:.0%} lot "
+                                f"| signal={signal.growth_signal:.3f} "
+                                f"| variant={signal.growth_variant}")
+                            logging.info(f"[{self.account_key}][{symbol}] {growth_reason}")
+                except Exception as ge:
+                    logging.debug(f"[{self.account_key}] Growth hyperplasia check: {ge}")
+
+            # Growth Amplifier: Lipolysis (tighten SL on losing positions)
+            if self.teqa_bridge is not None:
+                try:
+                    signal = self.teqa_bridge.read_signal(symbol=symbol)
+                    if signal and signal.growth_active and signal.growth_lipolysis_factor < 1.0:
+                        self._apply_lipolysis(symbol, signal.growth_lipolysis_factor)
+                except Exception as le:
+                    logging.debug(f"[{self.account_key}] Growth lipolysis check: {le}")
+
             results[symbol] = {
                 'regime': regime.value,
                 'fidelity': fidelity,
                 'action': action.name if action else 'NONE',
                 'confidence': confidence,
                 'trade_executed': trade_executed,
+                'growth': growth_reason if growth_reason else 'inactive',
             }
 
             # Send to QuantumChildren network
