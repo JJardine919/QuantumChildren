@@ -52,8 +52,8 @@ except ImportError:
     pass
 _API_KEY = os.environ.get('QC_COLLECTION_API_KEY', '')
 
-# Local backup folder
-LOCAL_BACKUP = Path("quantum_data/")
+# Local backup folder — anchored to script location, not cwd
+LOCAL_BACKUP = Path(__file__).parent / "quantum_data"
 LOCAL_BACKUP.mkdir(exist_ok=True)
 
 # Generate unique node ID (persisted locally, anonymous)
@@ -311,7 +311,7 @@ def get_local_stats():
                 stats['signals'] += count
             elif 'entropy' in log_file.name:
                 stats['entropy'] += count
-        except:
+        except Exception:
             pass
 
     return stats

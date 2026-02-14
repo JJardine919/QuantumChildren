@@ -98,6 +98,14 @@
             "magic": 152001,
             "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
             "enabled": true
+        },
+        "JIMMY_FTMO": {
+            "account": 1512556097,
+            "server": "FTMO-Demo",
+            "terminal_path": "C:\\Program Files\\FTMO Global Markets MT5 Terminal\\terminal64.exe",
+            "magic": 151201,
+            "symbols": ["BTCUSD", "XAUUSD", "ETHUSD"],
+            "enabled": true
         }
     },
 
@@ -109,7 +117,7 @@
         "WARNING_DOPAMINE_MULT": 0.50,
         "CRITICAL_DOPAMINE_MULT": 0.05,
         "RESET_HOUR_UTC": 0,
-        "INCLUDE_UNREALIZED_PNL": false
+        "INCLUDE_UNREALIZED_PNL": true
     },
 
     "REST_SCHEDULE": {
@@ -135,6 +143,9 @@
         "INCLUDE_UNREALIZED_PNL": true,
         "CLOSE_BEFORE_WEEKEND": true,
         "TRADE_STAGGER_SECONDS": [30, 120],
+        "FTMO_RISK_PER_TRADE": 150.0,
+        "FTMO_ATR_MULTIPLIER": 0.5,
+        "FTMO_RISK_PERCENT": 0.00075,
         "CHALLENGE_PROFILE": {
             "MAX_LOSS_DOLLARS": 1.50,
             "CONFIDENCE_THRESHOLD": 0.18

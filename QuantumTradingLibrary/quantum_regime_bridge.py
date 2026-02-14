@@ -16,7 +16,9 @@ Provides two interfaces:
 Both return Tuple[Regime, float] matching the existing interface.
 """
 
+import io
 import logging
+import pickle
 import zlib
 import sqlite3
 import numpy as np
@@ -24,6 +26,33 @@ from enum import Enum
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Tuple, Optional, List, Dict
+
+
+# ============================================================
+# RESTRICTED UNPICKLER — prevents arbitrary code execution
+# Only allows numpy arrays and basic Python types.
+# ============================================================
+
+class RestrictedUnpickler(pickle.Unpickler):
+    """Safe unpickler that blocks arbitrary class instantiation.
+
+    Only permits modules whose top-level package is in SAFE_MODULES.
+    This prevents pickle-based code execution if the archiver DB is tampered with.
+    """
+    SAFE_MODULES = {'numpy', 'numpy.core.multiarray', 'builtins', 'collections'}
+
+    def find_class(self, module: str, name: str):
+        top_module = module.split('.')[0]
+        if top_module in self.SAFE_MODULES:
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(
+            f"Blocked unpickling of {module}.{name} — not in SAFE_MODULES whitelist"
+        )
+
+
+def _safe_loads(data: bytes):
+    """Deserialize pickle data using RestrictedUnpickler."""
+    return RestrictedUnpickler(io.BytesIO(data)).load()
 
 log = logging.getLogger(__name__)
 
@@ -129,8 +158,7 @@ def _query_archiver(symbol: str, config: dict) -> Optional[Dict]:
             return None
 
         import gzip
-        import pickle
-        features = pickle.loads(gzip.decompress(row[0]))
+        features = _safe_loads(gzip.decompress(row[0]))
         return features
 
     except Exception as e:

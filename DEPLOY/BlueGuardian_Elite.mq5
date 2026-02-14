@@ -35,6 +35,16 @@ input group "=== Risk Management ==="
 input double   InpDailyDDLimit    = 4.5;           // Daily DD Limit %
 input double   InpMaxDDLimit      = 9.0;           // Max DD Limit %
 
+input group "=== SL Dollar Cap ==="
+input double   MaxSLDollars       = 50.0;          // Maximum SL loss in dollars per position (0=unlimited)
+
+input group "=== Spread Filter ==="
+input int      MaxSpreadPoints    = 100;           // Max spread to allow trade (points)
+
+input group "=== Weekend Protection ==="
+input bool     WeekendProtection  = true;          // Block new trades near weekend
+input int      FridayCloseHour    = 21;            // Hour (UTC) to stop new entries on Friday
+
 input group "=== Stealth Settings ==="
 input bool     StealthMode        = false;         // Stealth Mode (hide EA identifiers)
 
@@ -401,12 +411,53 @@ int GetSignal()
 //+------------------------------------------------------------------+
 void ExecuteTrade(int direction)
 {
+   // Weekend protection - stop opening new positions near market close
+   if(WeekendProtection)
+   {
+      MqlDateTime dt;
+      TimeCurrent(dt);
+      if((dt.day_of_week == 5 && dt.hour >= FridayCloseHour) || dt.day_of_week == 6 || dt.day_of_week == 0)
+      {
+         Print("Weekend protection: Blocking new entry (Day=", dt.day_of_week, " Hour=", dt.hour, ")");
+         return;
+      }
+   }
+
    if(CopyBuffer(g_atrHandle, 0, 0, 3, g_atrBuffer) < 3) return;
 
    double atr = g_atrBuffer[1];
    if(atr <= 0) return;
 
+   // Spread check - skip trade if spread is too wide
+   long currentSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   if(currentSpread > MaxSpreadPoints)
+   {
+      Print("SKIP: Spread ", currentSpread, " exceeds max ", MaxSpreadPoints, " - no entry");
+      return;
+   }
+
    double slDistance = atr * SL_ATR_MULT;
+
+   // Cap SL to maximum dollar loss per position
+   if(MaxSLDollars > 0)
+   {
+      double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+      double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+      if(tickSize > 0 && tickValue > 0)
+      {
+         double slDollars = (slDistance / tickSize) * tickValue * InpVolume;
+         if(slDollars > MaxSLDollars)
+         {
+            double maxSlDistance = (MaxSLDollars / (tickValue * InpVolume)) * tickSize;
+            Print("SL CAPPED: ", DoubleToString(slDistance/_Point, 0), " pts ($",
+                  DoubleToString(slDollars, 2), ") -> ",
+                  DoubleToString(maxSlDistance/_Point, 0), " pts ($",
+                  DoubleToString(MaxSLDollars, 2), ")");
+            slDistance = maxSlDistance;
+         }
+      }
+   }
+
    double tpDistance = atr * TP_ATR_MULT;
    double partialTpDist = tpDistance * PARTIAL_TP_RATIO;
 
@@ -482,6 +533,34 @@ void ExecuteTrade(int direction)
    Print(typeStr, " @ ", DoubleToString(price, 2),
          " | Hidden SL: ", DoubleToString(virtualSL, 2),
          " | Hidden TP: ", DoubleToString(virtualTP, 2));
+
+   // === EMERGENCY BROKER-SIDE SL (catastrophic backstop - 5x virtual SL) ===
+   // If MT5 crashes or EA is removed, this wide SL protects the position.
+   // Set far enough away (5x) that normal virtual SL management is not affected.
+   {
+      double emergency_sl_dist = slDistance * 5.0;  // 5x normal SL distance
+      double emergencySL = (direction > 0) ?
+          price - emergency_sl_dist :
+          price + emergency_sl_dist;
+      emergencySL = NormalizeDouble(emergencySL, (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS));
+
+      MqlTradeRequest slReq;
+      MqlTradeResult slRes;
+      ZeroMemory(slReq);
+      ZeroMemory(slRes);
+      slReq.action = TRADE_ACTION_SLTP;
+      slReq.position = result.order;
+      slReq.symbol = _Symbol;
+      slReq.sl = emergencySL;
+      slReq.tp = 0;
+      if(!OrderSend(slReq, slRes))
+          Print("WARNING: Could not set emergency SL: ", GetLastError());
+      else if(slRes.retcode == TRADE_RETCODE_DONE)
+          Print("  Emergency backstop SL set at ", DoubleToString(emergencySL, _Digits),
+                " (5x SL dist = ", DoubleToString(emergency_sl_dist, 2), ")");
+      else
+          Print("WARNING: Emergency SL rejected: ", slRes.retcode, " - ", slRes.comment);
+   }
 }
 
 //+------------------------------------------------------------------+

@@ -366,6 +366,7 @@ public:
       //=== NEW GATES (v3.0) ===
 
       //--- G7: Neural Mosaic Consensus ---
+      double neural_consensus = 0.0;  // hoisted for debug print at end
       if(n_neurons > 0)
       {
          int long_votes = 0, short_votes = 0;
@@ -376,6 +377,7 @@ public:
          }
 
          double consensus = (double)MathMax(long_votes, short_votes) / n_neurons;
+         neural_consensus = consensus;
 
          if(consensus < m_neural_consensus_min)
          {
@@ -445,8 +447,7 @@ public:
       if(m_debug_mode)
          Print("[JGv3] ALL 10 GATES PASSED -> EXECUTE (entropy=",
                DoubleToString(entropy,3), " prob=", DoubleToString(probability,3),
-               " consensus=", DoubleToString(n_neurons > 0 ?
-                   (double)MathMax(0,0) : 0.0, 3),
+               " consensus=", DoubleToString(neural_consensus, 3),
                " shock=", DoubleToString(shock_score, 2), ")");
 
       return true;

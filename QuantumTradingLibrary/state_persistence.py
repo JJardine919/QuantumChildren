@@ -16,6 +16,7 @@ Usage:
     sp.restore_state(trader)  # Restore on wake or restart
 """
 
+import hashlib
 import json
 import logging
 from datetime import datetime
@@ -25,6 +26,7 @@ STATE_DIR = Path(__file__).parent / "state_snapshots"
 STATE_DIR.mkdir(exist_ok=True)
 
 PERIODIC_SAVE_MINUTES = 30
+_STATE_VERSION = 1
 
 
 class StatePersistence:
@@ -92,6 +94,11 @@ class StatePersistence:
                         "last_reset_date": str(getattr(dd_tracker, 'last_reset_date', '')),
                     }
 
+            # Add version and checksum for integrity verification
+            state["_version"] = _STATE_VERSION
+            json_bytes = json.dumps(state, indent=2, sort_keys=True).encode('utf-8')
+            state["_checksum"] = hashlib.md5(json_bytes).hexdigest()
+
             # Write atomically (write to temp, then rename)
             temp_file = self.state_file.with_suffix('.tmp')
             with open(temp_file, 'w') as f:
@@ -115,6 +122,27 @@ class StatePersistence:
         try:
             with open(self.state_file, 'r') as f:
                 state = json.load(f)
+
+            # Verify version compatibility
+            file_version = state.get("_version", 0)
+            if file_version != _STATE_VERSION:
+                logging.warning(
+                    f"[{self.account_key}] State version mismatch: "
+                    f"file={file_version}, expected={_STATE_VERSION} -- starting fresh"
+                )
+                return False
+
+            # Verify checksum integrity
+            saved_checksum = state.pop("_checksum", None)
+            if saved_checksum is not None:
+                verify_bytes = json.dumps(state, indent=2, sort_keys=True).encode('utf-8')
+                computed_checksum = hashlib.md5(verify_bytes).hexdigest()
+                if computed_checksum != saved_checksum:
+                    logging.warning(
+                        f"[{self.account_key}] State checksum mismatch: "
+                        f"file may be corrupt -- starting fresh"
+                    )
+                    return False
 
             restored_items = []
 

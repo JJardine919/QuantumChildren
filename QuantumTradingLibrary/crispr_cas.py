@@ -33,7 +33,6 @@ Version: CRISPR-CAS-1.0
 """
 
 import json
-import math
 import hashlib
 import logging
 import sqlite3

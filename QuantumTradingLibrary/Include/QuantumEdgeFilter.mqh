@@ -1,23 +1,26 @@
 //+------------------------------------------------------------------+
-//|                                       JardinesGateAlgorithm.mqh  |
+//|                                        QuantumEdgeFilter.mqh     |
 //|                              Quantum Children Trading Systems    |
-//|                                  Jardine's Gate Algorithm v2.0   |
+//|                    Jardine's Gate Algorithm v2.0 (Canonical)      |
 //+------------------------------------------------------------------+
 #property copyright "Quantum Children"
 #property version   "2.00"
 
 /*
-  ╔══════════════════════════════════════════════════════════════╗
-  ║              JARDINE'S GATE ALGORITHM v2.0                    ║
-  ╠══════════════════════════════════════════════════════════════╣
-  ║ Six-gate quantum filter. Blocks bad signals, passes good.    ║
-  ║ Backtested: 100% win rate when all gates pass.               ║
-  ║                                                               ║
-  ║ "Only the worthy signals pass through the gates."            ║
-  ╚══════════════════════════════════════════════════════════════╝
+  +==============================================================+
+  |              JARDINE'S GATE ALGORITHM v2.0                    |
+  +==============================================================+
+  | Six-gate quantum filter. Blocks bad signals, passes good.    |
+  | Backtested: 100% win rate when all gates pass.               |
+  |                                                               |
+  | "Only the worthy signals pass through the gates."            |
+  +==============================================================+
+
+  NOTE: This is the CANONICAL file for the Jardine's Gate filter.
+        JardinesGate.mqh now redirects here for backward compatibility.
 
   USAGE:
-  ────────────────────────────────────────────────────────────────
+  ----------------------------------------------------------------
   #include <QuantumEdgeFilter.mqh>
 
   QuantumEdgeFilter filter;
@@ -162,9 +165,9 @@ public:
    //+------------------------------------------------------------------+
    //| CORE FORMULA: Calculate entropy factor                           |
    //|                                                                   |
-   //|  E(H) = ┌ 1.0                    if H < 0.90                     |
-   //|         │ 1.0 - 9(H - 0.90)      if 0.90 ≤ H < 0.99             |
-   //|         └ 0.1                    if H ≥ 0.99                     |
+   //|  E(H) = | 1.0                    if H < 0.90                     |
+   //|         | 1.0 - 9(H - 0.90)      if 0.90 <= H < 0.99            |
+   //|         | 0.1                    if H >= 0.99                    |
    //+------------------------------------------------------------------+
    double CalculateEntropyFactor(double entropy)
    {
@@ -179,7 +182,7 @@ public:
    //+------------------------------------------------------------------+
    //| CORE FORMULA: Calculate trade probability                        |
    //|                                                                   |
-   //|  P(trade) = |ψ|² × E(entropy) × interference × confidence       |
+   //|  P(trade) = |psi|^2 x E(entropy) x interference x confidence    |
    //+------------------------------------------------------------------+
    double CalculateProbability(double amplitude_squared,
                                double entropy,
@@ -194,7 +197,7 @@ public:
    //+------------------------------------------------------------------+
    //| MAIN FILTER: Check all gates                                     |
    //|                                                                   |
-   //| Signal ──[G1]──[G2]──[G3]──[G4]──[G5]──[G6]──► EXECUTE          |
+   //| Signal --[G1]--[G2]--[G3]--[G4]--[G5]--[G6]--> EXECUTE          |
    //+------------------------------------------------------------------+
    bool ShouldTrade(double entropy,
                     double interference,
@@ -278,7 +281,7 @@ public:
       //--- ALL GATES PASSED
       m_passed++;
       if(m_debug_mode)
-         Print("[QEF] ALL GATES PASSED → EXECUTE (entropy=",
+         Print("[QEF] ALL GATES PASSED -> EXECUTE (entropy=",
                DoubleToString(entropy,3), " prob=", DoubleToString(probability,3), ")");
 
       return true;
@@ -428,19 +431,19 @@ public:
       double pass_rate = (m_total_checks > 0) ? (double)m_passed / m_total_checks * 100 : 0;
 
       return StringFormat(
-         "\n╔══════════════════════════════════════════════════════════════╗\n"
-         "║               JARDINE'S GATE ALGORITHM STATS                  ║\n"
-         "╠══════════════════════════════════════════════════════════════╣\n"
-         "║ Total Checks:     %6d                                     ║\n"
-         "║ Passed:           %6d  (%.1f%%)                            ║\n"
-         "╠══════════════════════════════════════════════════════════════╣\n"
-         "║ G1 Blocks (Entropy):      %6d                              ║\n"
-         "║ G2 Blocks (Interference): %6d                              ║\n"
-         "║ G3 Blocks (Confidence):   %6d                              ║\n"
-         "║ G4 Blocks (Probability):  %6d                              ║\n"
-         "║ G5 Blocks (Direction):    %6d                              ║\n"
-         "║ G6 Blocks (Kill Switch):  %6d                              ║\n"
-         "╚══════════════════════════════════════════════════════════════╝",
+         "\n+==============================================================+\n"
+         "|               JARDINE'S GATE ALGORITHM STATS                  |\n"
+         "+==============================================================+\n"
+         "| Total Checks:     %6d                                     |\n"
+         "| Passed:           %6d  (%.1f%%)                            |\n"
+         "+==============================================================+\n"
+         "| G1 Blocks (Entropy):      %6d                              |\n"
+         "| G2 Blocks (Interference): %6d                              |\n"
+         "| G3 Blocks (Confidence):   %6d                              |\n"
+         "| G4 Blocks (Probability):  %6d                              |\n"
+         "| G5 Blocks (Direction):    %6d                              |\n"
+         "| G6 Blocks (Kill Switch):  %6d                              |\n"
+         "+==============================================================+",
          m_total_checks, m_passed, pass_rate,
          m_blocked_g1, m_blocked_g2, m_blocked_g3,
          m_blocked_g4, m_blocked_g5, m_blocked_g6
@@ -453,18 +456,18 @@ public:
    void PrintThresholds()
    {
       Print(
-         "\n╔══════════════════════════════════════════════════════════════╗\n"
-         "║            JARDINE'S GATE ALGORITHM THRESHOLDS                ║\n"
-         "╠═══════════════════════╦══════════╦═══════════════════════════╣\n"
-         "║ Parameter             ║ Value    ║ Effect                    ║\n"
-         "╠═══════════════════════╬══════════╬═══════════════════════════╣\n",
-         "║ ENTROPY_CLEAN         ║ ", DoubleToString(m_entropy_clean, 2), "     ║ Gate threshold            ║\n",
-         "║ CONFIDENCE_MIN        ║ ", DoubleToString(m_confidence_min, 2), "     ║ Signal clarity floor      ║\n",
-         "║ INTERFERENCE_MIN      ║ ", DoubleToString(m_interference_min, 2), "     ║ Expert agreement floor    ║\n",
-         "║ PROBABILITY_MIN       ║ ", DoubleToString(m_probability_min, 2), "     ║ Final score floor         ║\n",
-         "║ DIRECTION_BIAS        ║ ", (m_direction_bias == QEF_SHORT ? "SHORT" : (m_direction_bias == QEF_LONG ? "LONG " : "BOTH ")), "    ║ Allowed direction         ║\n",
-         "║ KILL_SWITCH_WR        ║ ", DoubleToString(m_kill_switch_wr, 2), "     ║ Min win rate (last ", IntegerToString(m_kill_switch_lookback), ")   ║\n",
-         "╚═══════════════════════╩══════════╩═══════════════════════════╝"
+         "\n+==============================================================+\n"
+         "|            JARDINE'S GATE ALGORITHM THRESHOLDS                |\n"
+         "+=======================+=========+===========================+\n"
+         "| Parameter             | Value   | Effect                    |\n"
+         "+=======================+=========+===========================+\n",
+         "| ENTROPY_CLEAN         | ", DoubleToString(m_entropy_clean, 2), "    | Gate threshold            |\n",
+         "| CONFIDENCE_MIN        | ", DoubleToString(m_confidence_min, 2), "    | Signal clarity floor      |\n",
+         "| INTERFERENCE_MIN      | ", DoubleToString(m_interference_min, 2), "    | Expert agreement floor    |\n",
+         "| PROBABILITY_MIN       | ", DoubleToString(m_probability_min, 2), "    | Final score floor         |\n",
+         "| DIRECTION_BIAS        | ", (m_direction_bias == QEF_SHORT ? "SHORT" : (m_direction_bias == QEF_LONG ? "LONG " : "BOTH ")), "   | Allowed direction         |\n",
+         "| KILL_SWITCH_WR        | ", DoubleToString(m_kill_switch_wr, 2), "    | Min win rate (last ", IntegerToString(m_kill_switch_lookback), ")   |\n",
+         "+=======================+=========+===========================+"
       );
    }
 

@@ -20,6 +20,7 @@ Date: 2026-02-11
 """
 
 import os
+import errno
 import json
 import logging
 from pathlib import Path
@@ -59,18 +60,9 @@ class ProcessLock:
         """
         Acquire lock. Returns True if successful, False if already locked.
 
-        If lockfile exists but process is dead, auto-removes stale lock.
+        Uses atomic file creation (O_CREAT | O_EXCL) to prevent TOCTOU races.
+        If lockfile exists but process is dead, auto-removes stale lock and retries.
         """
-        # Check existing lock
-        if self.lock_file.exists():
-            if self._is_lock_stale():
-                log.warning(f"Removing stale lockfile: {self.lock_file.name}")
-                self._remove_stale_lock()
-            else:
-                # Lock held by running process
-                return False
-
-        # Create lock
         lock_data = {
             "pid": os.getpid(),
             "name": self.name,
@@ -78,15 +70,44 @@ class ProcessLock:
             "timestamp": datetime.now().isoformat(),
             "host": os.getenv("COMPUTERNAME", "unknown"),
         }
+        lock_json = json.dumps(lock_data, indent=2)
 
+        # Attempt atomic file creation -- fails if file already exists
         try:
-            self.lock_file.write_text(json.dumps(lock_data, indent=2))
+            fd = os.open(str(self.lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                os.write(fd, lock_json.encode("utf-8"))
+            finally:
+                os.close(fd)
             self.acquired = True
             log.info(f"Acquired lock: {self.lock_file.name} (PID {os.getpid()})")
             return True
-        except Exception as e:
-            log.error(f"Failed to create lockfile {self.lock_file}: {e}")
-            return False
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                log.error(f"Failed to create lockfile {self.lock_file}: {e}")
+                return False
+
+        # File already exists -- check if the lock is stale
+        if self._is_lock_stale():
+            log.warning(f"Removing stale lockfile: {self.lock_file.name}")
+            self._remove_stale_lock()
+            # Retry atomic creation after removing stale lock
+            try:
+                fd = os.open(str(self.lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                try:
+                    os.write(fd, lock_json.encode("utf-8"))
+                finally:
+                    os.close(fd)
+                self.acquired = True
+                log.info(f"Acquired lock: {self.lock_file.name} (PID {os.getpid()}) [stale reclaimed]")
+                return True
+            except OSError:
+                # Another process grabbed it between our remove and re-create
+                log.warning(f"Lock reclaim race lost: {self.lock_file.name}")
+                return False
+
+        # Lock is held by a live process
+        return False
 
     def release(self):
         """Release lock by deleting lockfile."""

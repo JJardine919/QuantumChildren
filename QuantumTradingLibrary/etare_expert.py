@@ -19,12 +19,19 @@ import pandas as pd
 from pathlib import Path
 from typing import Optional, Tuple
 
-from quantum_feature_defs import (
-    QUANTUM_FEATURE_NAMES,
-    QUANTUM_FEATURE_DEFAULTS,
-    QUANTUM_FEATURE_COUNT,
-)
-from quantum_feature_fetcher import fetch_latest_quantum_features
+try:
+    from quantum_feature_defs import (
+        QUANTUM_FEATURE_NAMES,
+        QUANTUM_FEATURE_DEFAULTS,
+        QUANTUM_FEATURE_COUNT,
+    )
+    from quantum_feature_fetcher import fetch_latest_quantum_features
+except ImportError:
+    QUANTUM_FEATURE_NAMES = []
+    QUANTUM_FEATURE_DEFAULTS = {}
+    QUANTUM_FEATURE_COUNT = 7
+    def fetch_latest_quantum_features(*args, **kwargs):
+        return None
 
 log = logging.getLogger(__name__)
 
@@ -142,7 +149,7 @@ def prepare_etare_features(df: pd.DataFrame, symbol: str = "BTCUSD") -> Optional
     # Momentum
     d["momentum"] = d["close"] / d["close"].shift(10)
 
-    # ATR
+    # NOTE: This is 14-bar High-Low Range, NOT true ATR. Experts were trained with this formula.
     d["atr"] = d["high"].rolling(14).max() - d["low"].rolling(14).min()
 
     # Price changes

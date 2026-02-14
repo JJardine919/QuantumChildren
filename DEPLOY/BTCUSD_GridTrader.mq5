@@ -9,7 +9,7 @@
 #property description "BTCUSD Grid Trading EA with Entropy Filtering"
 #property description "Trades only in predictable (low entropy) market conditions"
 #property description "Hidden SL/TP | ATR-based levels | Partial TP at 50%"
-#property description "For GetLeveraged accounts: 113328, 113326, 107245"
+#property description "For GetLeveraged account: 107245 (GL_3 ACTIVE)"
 
 //--- Include shared entropy grid logic
 #include "EntropyGridCore.mqh"
@@ -18,7 +18,7 @@
 //| INPUT PARAMETERS                                                  |
 //+------------------------------------------------------------------+
 input group "=== ACCOUNT CONFIGURATION ==="
-input int      InpAccountSelector  = 1;           // Account (1=113328, 2=113326, 3=107245)
+input int      InpAccountSelector  = 3;           // Account (1=113328 DISABLED, 2=113326 DISABLED, 3=107245 ACTIVE)
 input int      InpMagicBase        = 113000;      // Magic Number Base
 
 input group "=== TRADING CONFIGURATION ==="
@@ -30,6 +30,10 @@ input double   InpRiskPercent      = 0.5;         // Risk Per Trade %
 input group "=== RISK MANAGEMENT ==="
 input double   InpDailyDDLimit     = 4.5;         // Daily Drawdown Limit %
 input double   InpMaxDDLimit       = 9.0;         // Max Drawdown Limit %
+input double   InpMaxSLDollars     = 50.0;        // Max SL Dollar Loss Per Position
+
+input group "=== SPREAD FILTER ==="
+input int      InpMaxSpreadPoints  = 500;         // Max spread to allow trade (points) - BTC typical
 
 input group "=== TIMING ==="
 input int      InpCheckInterval    = 30;          // Signal Check Interval (seconds)
@@ -50,9 +54,9 @@ input bool     InpTradeEnabled     = true;        // Trading Enabled
 //+------------------------------------------------------------------+
 //| ACCOUNT MAPPING                                                   |
 //+------------------------------------------------------------------+
-// Account 1: 113328 / GetLeveraged-Trade
-// Account 2: 113326 / GetLeveraged-Trade
-// Account 3: 107245 / GetLeveraged-Trade
+// Account 1: 113328 / GetLeveraged-Trade  ** DISABLED **
+// Account 2: 113326 / GetLeveraged-Trade  ** DISABLED **
+// Account 3: 107245 / GetLeveraged-Trade  ** ACTIVE **
 
 //+------------------------------------------------------------------+
 //| GLOBAL VARIABLES                                                  |
@@ -64,15 +68,26 @@ int                  g_magic = 0;
 
 //+------------------------------------------------------------------+
 //| Get Account ID from Selector                                      |
+//| NOTE: Accounts 113328 (GL_2) and 113326 (GL_1) are DISABLED.     |
+//|       Only 107245 (GL_3) is active. Selecting a disabled account  |
+//|       will print a warning and return -1.                          |
 //+------------------------------------------------------------------+
 int GetAccountId(int selector)
 {
    switch(selector)
    {
-      case 1: return 113328;
-      case 2: return 113326;
-      case 3: return 107245;
-      default: return 113328;
+      case 1: // 113328 - GL_2 -- DISABLED
+         Print("CRITICAL WARNING: Account 113328 (GL_2) is DISABLED! Do NOT trade on this account.");
+         Print("CRITICAL WARNING: Change InpAccountSelector to 3 (107245) immediately.");
+         return -1;
+      case 2: // 113326 - GL_1 -- DISABLED
+         Print("CRITICAL WARNING: Account 113326 (GL_1) is DISABLED! Do NOT trade on this account.");
+         Print("CRITICAL WARNING: Change InpAccountSelector to 3 (107245) immediately.");
+         return -1;
+      case 3: return 107245;  // GL_3 -- ACTIVE
+      default:
+         Print("CRITICAL WARNING: Unknown account selector ", selector, ". Defaulting to 107245 (GL_3).");
+         return 107245;
    }
 }
 
@@ -94,7 +109,7 @@ int OnInit()
    Print("Magic: ", g_magic);
    Print("--------------------------------------------------------");
    Print("ENTROPY FILTER: ENABLED");
-   Print("  - Confidence Threshold: 80%");
+   Print("  - Confidence Threshold: 22%");
    Print("  - Compression Boost: +12");
    Print("  - Trades only in LOW entropy (predictable) markets");
    Print("--------------------------------------------------------");
@@ -120,6 +135,8 @@ int OnInit()
    g_gridManager.SetMaxPositions(InpMaxPositions);
    g_gridManager.SetDrawdownLimits(InpDailyDDLimit, InpMaxDDLimit);
    g_gridManager.SetRiskPercent(InpRiskPercent);
+   g_gridManager.SetMaxSpreadPoints(InpMaxSpreadPoints);
+   g_gridManager.SetMaxSLDollars(InpMaxSLDollars);
 
    Print("BTCUSD Grid Trader initialized successfully");
    Print("Account Balance: $", DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2));
@@ -180,24 +197,5 @@ void OnTick()
             " | Equity: $", DoubleToString(equity, 2));
       lastLog = TimeCurrent();
    }
-}
-
-//+------------------------------------------------------------------+
-//| Chart Event Handler                                               |
-//+------------------------------------------------------------------+
-void OnChartEvent(const int id,
-                  const long &lparam,
-                  const double &dparam,
-                  const string &sparam)
-{
-   // Future: Add dashboard controls
-}
-
-//+------------------------------------------------------------------+
-//| Timer Function                                                    |
-//+------------------------------------------------------------------+
-void OnTimer()
-{
-   // Future: Periodic reporting
 }
 //+------------------------------------------------------------------+

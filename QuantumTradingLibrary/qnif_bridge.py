@@ -164,7 +164,9 @@ class QNIFBridge:
         # Symbol check
         signal_symbol = data.get('symbol', '')
         if expected_symbol and signal_symbol and signal_symbol != expected_symbol:
-            logger.debug(f"[QNIF] Symbol mismatch: expected {expected_symbol}, got {signal_symbol}")
+            logger.debug(f"[QNIF] Symbol mismatch: expected {expected_symbol}, got {signal_symbol}"
+                         " -- returning None")
+            return None
 
         return QNIFSignal(
             symbol=signal_symbol,

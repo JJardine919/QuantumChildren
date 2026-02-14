@@ -6,7 +6,7 @@
 #property copyright "Quantum Trading Library"
 #property link      "https://quantumtradinglib.com"
 #property version   "2.00"
-#property strict
+
 
 //+------------------------------------------------------------------+
 //| INPUT PARAMETERS - CONFIGURE PER ACCOUNT                          |
@@ -33,6 +33,13 @@ input group "=== RISK MANAGEMENT ==="
 input double   DailyDDLimit      = 4.5;              // Daily Drawdown Limit %
 input double   MaxDDLimit        = 9.0;              // Max Drawdown Limit %
 input bool     UseHiddenSLTP     = true;             // Hidden SL/TP (manage internally)
+
+input group "=== SPREAD FILTER ==="
+input int      MaxSpreadPoints   = 100;              // Max spread to allow trade (points)
+
+input group "=== WEEKEND PROTECTION ==="
+input bool     WeekendProtection = true;             // Block new trades near weekend
+input int      FridayCloseHour   = 21;               // Hour (UTC) to stop new entries on Friday
 
 input group "=== STEALTH SETTINGS ==="
 input bool     StealthMode       = false;            // Stealth Mode (hide EA identifiers)
@@ -872,6 +879,26 @@ void CheckEntry()
 //+------------------------------------------------------------------+
 void OpenPosition(ENUM_ORDER_TYPE type, int level)
 {
+   // Weekend protection - stop opening new positions near market close
+   if(WeekendProtection)
+   {
+      MqlDateTime dt;
+      TimeCurrent(dt);
+      if((dt.day_of_week == 5 && dt.hour >= FridayCloseHour) || dt.day_of_week == 6 || dt.day_of_week == 0)
+      {
+         Print("Weekend protection: Blocking new entry (Day=", dt.day_of_week, " Hour=", dt.hour, ")");
+         return;
+      }
+   }
+
+   // Spread check - skip trade if spread is too wide
+   long currentSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   if(currentSpread > MaxSpreadPoints)
+   {
+      Print("SKIP: Spread ", currentSpread, " exceeds max ", MaxSpreadPoints, " - no entry");
+      return;
+   }
+
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol, tick)) return;
 
@@ -948,6 +975,38 @@ void OpenPosition(ENUM_ORDER_TYPE type, int level)
       Print(typeStr, " L", level, " placed [JARDINE'S GATE PASSED] | Price: ", DoubleToString(price, 2),
             " | Lot: ", DoubleToString(lot, 2),
             " | TP: ", DoubleToString(hiddenTP, 2));
+
+      // === EMERGENCY BROKER-SIDE SL (catastrophic backstop) ===
+      // Only needed when using hidden SL/TP (broker has SL=0).
+      // Sets a wide emergency SL at 5x the hidden SL distance so it won't
+      // interfere with normal virtual SL management, but protects the account
+      // if MT5 crashes or EA is removed.
+      if(UseHiddenSLTP)
+      {
+         double sl_dist = TakeProfitPts * 2.0 * point;  // Same as hiddenSL calculation
+         double emergency_sl_dist = sl_dist * 5.0;       // 5x hidden SL distance
+         double emergencySL = (type == ORDER_TYPE_BUY) ?
+             price - emergency_sl_dist :
+             price + emergency_sl_dist;
+         emergencySL = NormalizeDouble(emergencySL, (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS));
+
+         MqlTradeRequest slReq;
+         MqlTradeResult slRes;
+         ZeroMemory(slReq);
+         ZeroMemory(slRes);
+         slReq.action = TRADE_ACTION_SLTP;
+         slReq.position = result.order;
+         slReq.symbol = _Symbol;
+         slReq.sl = emergencySL;
+         slReq.tp = 0;
+         if(!OrderSend(slReq, slRes))
+             Print("WARNING: Could not set emergency SL: ", GetLastError());
+         else if(slRes.retcode == TRADE_RETCODE_DONE)
+             Print("  Emergency backstop SL set at ", DoubleToString(emergencySL, 2),
+                   " (5x SL dist = ", DoubleToString(emergency_sl_dist, 2), ")");
+         else
+             Print("WARNING: Emergency SL rejected: ", slRes.retcode, " - ", slRes.comment);
+      }
    }
    else
    {

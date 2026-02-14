@@ -57,6 +57,7 @@ logging.basicConfig(
 # ============================================================
 from config_loader import (
     MAX_LOSS_DOLLARS,
+    INITIAL_SL_DOLLARS,
     TP_MULTIPLIER,
     ROLLING_SL_MULTIPLIER,
     DYNAMIC_TP_PERCENT,
@@ -71,6 +72,9 @@ from config_loader import (
 
 # Import credentials securely - passwords from .env file
 from credential_manager import get_credentials, CredentialError
+
+# Process lock to prevent duplicate launches
+from process_lock import ProcessLock
 
 # Pre-launch validation
 from prelaunch_validator import validate_prelaunch
@@ -516,10 +520,11 @@ class InstantTrader:
         if sl_distance < min_sl_distance:
             sl_distance = min_sl_distance
 
-        # Calculate lot size to keep loss at exactly MAX_LOSS_DOLLARS
+        # Calculate lot size to keep initial loss at INITIAL_SL_DOLLARS ($0.60)
+        # Rolling SL in manage_positions() will widen to MAX_LOSS_DOLLARS ($1.00)
         sl_ticks = sl_distance / tick_size if tick_size > 0 else 0
         if tick_value > 0 and sl_ticks > 0:
-            lot = MAX_LOSS_DOLLARS / (sl_ticks * tick_value)
+            lot = INITIAL_SL_DOLLARS / (sl_ticks * tick_value)
         else:
             lot = symbol_info.volume_min
 
@@ -572,7 +577,7 @@ class InstantTrader:
             logging.error(f"order_send exception: {e}")
             return False
         if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-            logging.info(f"TRADE: {action.name} {symbol} @ {price:.2f} | SL: ${MAX_LOSS_DOLLARS} | TP: ${MAX_LOSS_DOLLARS * TP_MULTIPLIER} | Dyn TP at {DYNAMIC_TP_PERCENT}%")
+            logging.info(f"TRADE: {action.name} {symbol} @ {price:.2f} | SL: ${INITIAL_SL_DOLLARS} (rolls to ${MAX_LOSS_DOLLARS}) | TP: ${INITIAL_SL_DOLLARS * TP_MULTIPLIER} | Dyn TP at {DYNAMIC_TP_PERCENT}%")
             return True
         else:
             logging.error(f"TRADE FAILED: {result.comment if result else 'None'}")
@@ -742,7 +747,7 @@ class InstantTrader:
                         'regime': regime.value,
                         'source': 'BG_INSTANT'
                     })
-                except:
+                except Exception:
                     pass
 
             # Apply TEQA quantum signal
@@ -807,6 +812,14 @@ def main():
 
     try:
         while True:
+            # Verify correct account before each cycle
+            acct = mt5.account_info()
+            if acct is None or acct.login != ACCOUNT['account']:
+                logging.critical(
+                    f"ACCOUNT MISMATCH! Expected {ACCOUNT['account']}, "
+                    f"got {acct.login if acct else 'None'}. Stopping to protect trades."
+                )
+                break
             trader.run_cycle()
             time.sleep(CHECK_INTERVAL)
     except KeyboardInterrupt:
@@ -816,10 +829,36 @@ def main():
 
 
 if __name__ == "__main__":
-    # Pre-launch validation - ensures experts are trained before trading
-    TRADING_SYMBOLS = ACCOUNT['symbols']
-    if not validate_prelaunch(symbols=TRADING_SYMBOLS):
-        logging.error("Pre-launch validation failed. Exiting.")
-        sys.exit(1)
+    # CRITICAL: Acquire process lock BEFORE doing anything
+    lock = ProcessLock("BRAIN_BG_INSTANT", account="366604")
 
-    main()
+    try:
+        with lock:
+            logging.info("=" * 60)
+            logging.info("BRAIN_BG_INSTANT - PROCESS LOCK ACQUIRED")
+            logging.info("=" * 60)
+
+            # Pre-launch validation - ensures experts are trained before trading
+            TRADING_SYMBOLS = ACCOUNT['symbols']
+            if not validate_prelaunch(symbols=TRADING_SYMBOLS):
+                logging.error("Pre-launch validation failed. Exiting.")
+                sys.exit(1)
+
+            main()
+
+    except RuntimeError as e:
+        logging.error("=" * 60)
+        logging.error("PROCESS LOCK FAILURE")
+        logging.error("=" * 60)
+        logging.error(str(e))
+        logging.error("")
+        logging.error("Another instance of BRAIN_BG_INSTANT is already running.")
+        logging.error("This prevents duplicate trades on account 366604.")
+        logging.error("")
+        logging.error("To stop all processes safely:")
+        logging.error("  Run: SAFE_SHUTDOWN.bat")
+        logging.error("")
+        logging.error("To check running processes:")
+        logging.error("  Run: python process_lock.py --list")
+        logging.error("=" * 60)
+        sys.exit(1)

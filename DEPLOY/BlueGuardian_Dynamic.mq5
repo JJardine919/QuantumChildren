@@ -34,6 +34,9 @@ input string   InpLLMConfigFile   = "llm_config.json";  // LLM Config File
 input int      InpLLMCheckSecs    = 60;            // LLM Check Interval (seconds)
 input bool     InpLLMEmergencyOff = true;          // Allow LLM Emergency Shutoff
 
+input group "=== SL Dollar Cap ==="
+input double   MaxSLDollars       = 50.0;          // Maximum SL loss in dollars per position (0=unlimited)
+
 input group "=== Risk Management ==="
 input double   InpDailyDDLimit    = 4.5;           // Daily DD Limit %
 input double   InpMaxDDLimit      = 9.0;           // Max DD Limit %
@@ -349,6 +352,26 @@ double CalculateInitialTP(double entryPrice, int direction)
 double CalculateInitialSL(double entryPrice, int direction)
 {
    double slDistance = INITIAL_SL_POINTS * g_point * SL_MULT;
+
+   // Cap SL to maximum dollar loss per position
+   if(MaxSLDollars > 0)
+   {
+      double tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE);
+      double tickSize  = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
+      if(tickSize > 0 && tickValue > 0)
+      {
+         double slDollars = (slDistance / tickSize) * tickValue * InpVolume;
+         if(slDollars > MaxSLDollars)
+         {
+            double maxSlDistance = (MaxSLDollars / (tickValue * InpVolume)) * tickSize;
+            Print("SL CAPPED: ", DoubleToString(slDistance/g_point, 0), " pts ($",
+                  DoubleToString(slDollars, 2), ") -> ",
+                  DoubleToString(maxSlDistance/g_point, 0), " pts ($",
+                  DoubleToString(MaxSLDollars, 2), ")");
+            slDistance = maxSlDistance;
+         }
+      }
+   }
 
    if(direction > 0) // BUY
       return NormalizePrice(entryPrice - slDistance);

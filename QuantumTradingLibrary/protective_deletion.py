@@ -29,7 +29,6 @@ Version: PROTECTIVE-DELETION-1.0
 import hashlib
 import json
 import logging
-import math
 import os
 import sqlite3
 import time

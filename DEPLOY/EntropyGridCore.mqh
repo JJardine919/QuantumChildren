@@ -44,10 +44,10 @@ private:
    // Configuration
    string         m_symbol;
    int            m_magic;
-   double         m_accountId;
+   long           m_accountId;
 
    // Entropy configuration (hard-coded per spec)
-   double         m_confidenceThreshold;    // 0.80 base
+   double         m_confidenceThreshold;    // 0.22 base
    int            m_compressionBoost;       // +12
    double         m_slAtrMultiplier;        // 1.5x
    double         m_tpAtrMultiplier;        // 3.0x
@@ -66,8 +66,18 @@ private:
    double         m_dailyDDLimit;
    double         m_maxDDLimit;
 
+   // Spread filter
+   int            m_maxSpreadPoints;
+
+   // Weekend protection
+   bool           m_weekendProtection;
+   int            m_fridayCloseHour;
+
    // Stealth
    bool           m_stealthMode;
+
+   // SL Dollar Cap
+   double         m_maxSLDollars;
 
    // Indicator handles
    int            m_atrHandle;
@@ -105,7 +115,7 @@ public:
    ~CEntropyGridManager(void);
 
    // Initialization
-   bool           Initialize(string symbol, int magic, double accountId);
+   bool           Initialize(string symbol, int magic, long accountId);
    void           SetLotSizes(double baseLot, double maxLot);
    void           SetMaxPositions(int maxPos);
    void           SetDrawdownLimits(double dailyDD, double maxDD);
@@ -115,6 +125,10 @@ public:
    void           SetBreakEvenTrigger(double trigger);
    void           SetTrailStartTrigger(double trigger);
    void           SetStealthMode(bool stealth) { m_stealthMode = stealth; }
+   void           SetMaxSpreadPoints(int maxSpread) { m_maxSpreadPoints = maxSpread; }
+   void           SetWeekendProtection(bool enabled) { m_weekendProtection = enabled; }
+   void           SetFridayCloseHour(int hour) { m_fridayCloseHour = hour; }
+   void           SetMaxSLDollars(double maxDollars) { m_maxSLDollars = maxDollars; }
    void           SetCompressionBoost(int boost);
    void           SetConfidenceThreshold(double threshold);
    void           Deinitialize(void);
@@ -197,6 +211,10 @@ CEntropyGridManager::CEntropyGridManager(void)
    m_riskPerTradePct = 0.5;
    m_dailyDDLimit = 4.5;
    m_maxDDLimit = 9.0;
+   m_maxSpreadPoints = 0; // 0 = disabled (parent EA must set via SetMaxSpreadPoints)
+   m_weekendProtection = true;
+   m_fridayCloseHour = 21; // UTC Friday 9 PM (near market close)
+   m_maxSLDollars = 0;    // 0 = unlimited (parent EA must set via SetMaxSLDollars)
 
    // Handles
    m_atrHandle = INVALID_HANDLE;
@@ -223,7 +241,7 @@ CEntropyGridManager::~CEntropyGridManager(void)
 //+------------------------------------------------------------------+
 //| Initialize                                                        |
 //+------------------------------------------------------------------+
-bool CEntropyGridManager::Initialize(string symbol, int magic, double accountId)
+bool CEntropyGridManager::Initialize(string symbol, int magic, long accountId)
 {
    m_symbol = symbol;
    m_magic = magic;
@@ -254,7 +272,7 @@ bool CEntropyGridManager::Initialize(string symbol, int magic, double accountId)
    SyncPositions();
 
    Print("EntropyGridManager initialized for ", m_symbol, " | Magic: ", m_magic,
-         " | Account: ", DoubleToString(m_accountId, 0));
+         " | Account: ", IntegerToString(m_accountId));
    Print("  Entropy Filter: ENABLED | Confidence: ", m_confidenceThreshold,
          " | Boost: +", m_compressionBoost);
    Print("  ATR Multipliers: SL=", m_slAtrMultiplier, "x | TP=", m_tpAtrMultiplier, "x");
@@ -583,15 +601,36 @@ bool CEntropyGridManager::OpenGridPosition(int direction, int level)
 {
    if(!ShouldOpenGrid(direction)) return false;
 
+   // Weekend protection - stop opening new positions near market close
+   if(m_weekendProtection)
+   {
+      MqlDateTime dt;
+      TimeCurrent(dt);
+      if((dt.day_of_week == 5 && dt.hour >= m_fridayCloseHour) || dt.day_of_week == 6 || dt.day_of_week == 0)
+      {
+         Print(m_symbol, " Weekend protection: Blocking new entry (Day=", dt.day_of_week, " Hour=", dt.hour, ")");
+         return false;
+      }
+   }
+
+   // Spread check - skip trade if spread is too wide
+   if(m_maxSpreadPoints > 0)
+   {
+      long currentSpread = SymbolInfoInteger(m_symbol, SYMBOL_SPREAD);
+      if(currentSpread > m_maxSpreadPoints)
+      {
+         Print(m_symbol, " SKIP: Spread ", currentSpread, " exceeds max ", m_maxSpreadPoints, " - no entry");
+         return false;
+      }
+   }
+
    double atr = GetATR();
    if(atr <= 0) return false;
 
    // Calculate SL/TP distances based on ATR
    double slDistance = atr * m_slAtrMultiplier;
-   double tpDistance = atr * m_tpAtrMultiplier;
-   double partialTpDistance = tpDistance * m_partialTpRatio;
 
-   // Calculate lot size
+   // Calculate lot size (before cap, so lot is based on original SL)
    double lot = CalculateLotSize(slDistance);
 
    // Reduce lot size for medium entropy
@@ -602,6 +641,29 @@ bool CEntropyGridManager::OpenGridPosition(int direction, int level)
 
    lot = NormalizeLot(lot);
    if(lot <= 0) return false;
+
+   // Cap SL to maximum dollar loss per position
+   if(m_maxSLDollars > 0)
+   {
+      double tickValue = SymbolInfoDouble(m_symbol, SYMBOL_TRADE_TICK_VALUE);
+      double tickSize  = SymbolInfoDouble(m_symbol, SYMBOL_TRADE_TICK_SIZE);
+      if(tickSize > 0 && tickValue > 0)
+      {
+         double slDollars = (slDistance / tickSize) * tickValue * lot;
+         if(slDollars > m_maxSLDollars)
+         {
+            double maxSlDistance = (m_maxSLDollars / (tickValue * lot)) * tickSize;
+            Print(m_symbol, " SL CAPPED: ", DoubleToString(slDistance / SymbolInfoDouble(m_symbol, SYMBOL_POINT), 0), " pts ($",
+                  DoubleToString(slDollars, 2), ") -> ",
+                  DoubleToString(maxSlDistance / SymbolInfoDouble(m_symbol, SYMBOL_POINT), 0), " pts ($",
+                  DoubleToString(m_maxSLDollars, 2), ")");
+            slDistance = maxSlDistance;
+         }
+      }
+   }
+
+   double tpDistance = atr * m_tpAtrMultiplier;
+   double partialTpDistance = tpDistance * m_partialTpRatio;
 
    // Get current price
    MqlTick tick;

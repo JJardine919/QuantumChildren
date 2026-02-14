@@ -1,0 +1,135 @@
+{
+  "symbol": "BTCUSD",
+  "model_type": "conv1d",
+  "device": "privateuseone:0",
+  "completed": "2026-02-13T12:29:47.263234",
+  "total_months": 60,
+  "num_cycles": 10,
+  "tf_rotation": [
+    "M1",
+    "M5",
+    "M15",
+    "M1",
+    "M5",
+    "M15",
+    "M1",
+    "M5",
+    "M15",
+    "M1"
+  ],
+  "before_wr": 0.6371,
+  "after_wr": 0.5025,
+  "delta_wr": -0.1346,
+  "overall_best_wr": 1.0,
+  "total_time_seconds": 439.0,
+  "cycles": [
+    {
+      "cycle": 1,
+      "tf": "M1",
+      "skipped": true
+    },
+    {
+      "cycle": 2,
+      "tf": "M5",
+      "skipped": true
+    },
+    {
+      "cycle": 3,
+      "tf": "H1",
+      "skipped": false,
+      "train_bars": 2854,
+      "test_bars": 1451,
+      "train_seqs": 2819,
+      "test_seqs": 1416,
+      "best_wr": 1.0,
+      "avg_wr": 0.5048,
+      "best_trades": 53,
+      "time_seconds": 27.8
+    },
+    {
+      "cycle": 4,
+      "tf": "M1",
+      "skipped": true
+    },
+    {
+      "cycle": 5,
+      "tf": "M15",
+      "skipped": false,
+      "train_bars": 6256,
+      "test_bars": 5861,
+      "train_seqs": 6221,
+      "test_seqs": 5826,
+      "best_wr": 0.8571,
+      "avg_wr": 0.6009,
+      "best_trades": 157,
+      "time_seconds": 37.7
+    },
+    {
+      "cycle": 6,
+      "tf": "M15",
+      "skipped": false,
+      "train_bars": 11669,
+      "test_bars": 5961,
+      "train_seqs": 11634,
+      "test_seqs": 5926,
+      "best_wr": 0.7064,
+      "avg_wr": 0.5602,
+      "best_trades": 479,
+      "time_seconds": 76.9
+    },
+    {
+      "cycle": 7,
+      "tf": "M1",
+      "skipped": true
+    },
+    {
+      "cycle": 8,
+      "tf": "M15",
+      "skipped": false,
+      "train_bars": 11669,
+      "test_bars": 5961,
+      "train_seqs": 11634,
+      "test_seqs": 5926,
+      "best_wr": 1.0,
+      "avg_wr": 0.5583,
+      "best_trades": 389,
+      "time_seconds": 49.5
+    },
+    {
+      "cycle": 9,
+      "tf": "M15",
+      "skipped": false,
+      "train_bars": 11473,
+      "test_bars": 5861,
+      "train_seqs": 11438,
+      "test_seqs": 5826,
+      "best_wr": 0.7,
+      "avg_wr": 0.5279,
+      "best_trades": 47,
+      "time_seconds": 118.2
+    },
+    {
+      "cycle": 10,
+      "tf": "M5",
+      "skipped": false,
+      "train_bars": 35043,
+      "test_bars": 17898,
+      "train_seqs": 17504,
+      "test_seqs": 17863,
+      "best_wr": 0.6667,
+      "avg_wr": 0.5139,
+      "best_trades": 225,
+      "time_seconds": 115.7
+    }
+  ],
+  "config": {
+    "pop_size": 8,
+    "epochs_per_cycle": 15,
+    "early_stop_patience": 5,
+    "confidence_threshold": 0.55,
+    "label_smoothing": 0.02,
+    "batch_size": 256,
+    "lr": 0.001,
+    "grad_clip": 1.0
+  }
+}

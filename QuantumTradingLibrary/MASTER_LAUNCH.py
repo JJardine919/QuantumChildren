@@ -27,6 +27,7 @@ from typing import Dict, List, Optional
 
 # Process lock manager for duplicate detection
 from process_lock import ProcessLock, list_active_locks, LOCK_DIR
+from config_loader import WATCHDOG_LIMIT
 
 # ---------------------------------------------------------------
 # CONFIG
@@ -39,18 +40,15 @@ LOG_DIR = BASE_DIR / "orchestrator_logs"
 LOG_DIR.mkdir(exist_ok=True)
 
 # Map account keys to their BRAIN scripts
+# GL_1 and GL_2 DISABLED -- see CLAUDE.md (accounts 113326 and 113328 are inactive)
 BRAIN_SCRIPTS = {
     "BG_INSTANT":   "BRAIN_BG_INSTANT.py",
     "BG_CHALLENGE": "BRAIN_BG_CHALLENGE.py",
     "ATLAS":        "BRAIN_ATLAS.py",
-    "GL_1":         "BRAIN_GETLEVERAGED.py",
-    "GL_2":         "BRAIN_GETLEVERAGED.py",
     "GL_3":         "BRAIN_GETLEVERAGED.py",
     "FTMO":         "BRAIN_FTMO.py",
+    "JIMMY_FTMO":   "BRAIN_JIMMY_FTMO.py",
 }
-
-# Watchdog config per account
-WATCHDOG_LIMIT = 1.50  # Force-close above this loss
 
 # How often to check process health (seconds)
 HEALTH_CHECK_INTERVAL = 30
@@ -91,6 +89,7 @@ class ManagedProcess:
         self.cmd = cmd
         self.cwd = cwd
         self.process: Optional[subprocess.Popen] = None
+        self._log_handle = None
         self.restart_count = 0
         self.last_restart: Optional[datetime] = None
         self.started_at: Optional[datetime] = None
@@ -102,11 +101,17 @@ class ManagedProcess:
             log.warning(f"{self.name}: Already running (PID {self.process.pid})")
             return
 
-        log_handle = open(str(self.log_file), "a", encoding="utf-8")
+        # Close any previous log handle to prevent leaks on restart
+        if self._log_handle:
+            try:
+                self._log_handle.close()
+            except OSError:
+                pass
+        self._log_handle = open(str(self.log_file), "a", encoding="utf-8")
         self.process = subprocess.Popen(
             self.cmd,
             cwd=self.cwd,
-            stdout=log_handle,
+            stdout=self._log_handle,
             stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
@@ -130,6 +135,13 @@ class ManagedProcess:
                 self.process.kill()
                 self.process.wait()
             log.info(f"{self.name}: Stopped")
+        # Close log file handle to prevent leaks
+        if self._log_handle:
+            try:
+                self._log_handle.close()
+            except OSError:
+                pass
+            self._log_handle = None
 
     def restart(self) -> bool:
         """Restart the process with cooldown and max restart logic."""

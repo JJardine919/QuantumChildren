@@ -17,6 +17,11 @@ from enum import Enum
 from dataclasses import dataclass
 from typing import Tuple
 
+try:
+    from config_loader import CONFIDENCE_THRESHOLD
+except ImportError:
+    CONFIDENCE_THRESHOLD = 0.55
+
 from indicator_engine import IndicatorSnapshot, SymbolIndicators
 
 
@@ -153,10 +158,20 @@ def get_entropy_confidence(
     else:
         direction = "NONE"
 
+    # Classify entropy state inline (same logic as calculate_entropy)
+    if final_score >= CONFIDENCE_THRESHOLD:
+        entropy_state = EntropyState.LOW
+    else:
+        adjusted = CONFIDENCE_THRESHOLD * 0.50
+        if final_score >= adjusted:
+            entropy_state = EntropyState.MEDIUM
+        else:
+            entropy_state = EntropyState.HIGH
+
     return ConfidenceResult(
         raw_score=raw_score,
         final_score=final_score,
-        entropy_state=EntropyState.LOW,  # Classified below
+        entropy_state=entropy_state,
         direction=direction,
         ema_alignment=ema_alignment,
         ema_separation=ema_separation,
@@ -167,7 +182,7 @@ def get_entropy_confidence(
 
 def calculate_entropy(
     confidence_result: ConfidenceResult,
-    confidence_threshold: float = 0.22,
+    confidence_threshold: float = CONFIDENCE_THRESHOLD,
     compression_boost: float = 12.0,
 ) -> EntropyState:
     """
@@ -203,7 +218,7 @@ def calculate_entropy(
 def score_and_classify(
     snapshot: IndicatorSnapshot,
     engine: SymbolIndicators,
-    confidence_threshold: float = 0.22,
+    confidence_threshold: float = CONFIDENCE_THRESHOLD,
     compression_boost: float = 12.0,
 ) -> ConfidenceResult:
     """

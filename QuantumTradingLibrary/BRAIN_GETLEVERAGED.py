@@ -37,6 +37,7 @@ except ImportError:
 # Import trading settings from config - DO NOT HARDCODE
 from config_loader import (
     MAX_LOSS_DOLLARS,
+    INITIAL_SL_DOLLARS,
     TP_MULTIPLIER,
     ROLLING_SL_MULTIPLIER,
     DYNAMIC_TP_PERCENT,
@@ -51,6 +52,9 @@ from config_loader import (
 
 # Secure credential loading (H-1: no plaintext passwords)
 from credential_manager import get_credentials, CredentialError
+
+# Process lock to prevent duplicate launches
+from process_lock import ProcessLock
 
 # Pre-launch validation (H-7)
 from prelaunch_validator import validate_prelaunch
@@ -569,9 +573,10 @@ class AccountTrader:
         point = symbol_info.point
         stops_level = symbol_info.trade_stops_level
 
-        # Calculate SL distance for MAX_LOSS_DOLLARS from config
+        # Calculate SL distance using INITIAL_SL_DOLLARS ($0.60) from config
+        # Rolling SL in manage_positions() will widen to MAX_LOSS_DOLLARS ($1.00)
         if tick_value > 0 and lot > 0:
-            sl_ticks = MAX_LOSS_DOLLARS / (tick_value * lot)
+            sl_ticks = INITIAL_SL_DOLLARS / (tick_value * lot)
             sl_distance = sl_ticks * tick_size
         else:
             sl_distance = 50 * point
@@ -595,7 +600,7 @@ class AccountTrader:
             sl = price + sl_distance
             tp = price - tp_distance
 
-        logging.info(f"[{self.account_key}] SL Distance: {sl_distance:.2f} | Max Loss: ${MAX_LOSS_DOLLARS}")
+        logging.info(f"[{self.account_key}] SL Distance: {sl_distance:.2f} | Initial SL: ${INITIAL_SL_DOLLARS} (rolls to ${MAX_LOSS_DOLLARS})")
 
         filling_mode = mt5.ORDER_FILLING_IOC
         if symbol_info.filling_mode & mt5.ORDER_FILLING_FOK:
@@ -906,4 +911,30 @@ def run_single_account():
 # ============================================================
 
 if __name__ == "__main__":
-    run_single_account()
+    # CRITICAL: Acquire process lock BEFORE doing anything
+    # This prevents multiple instances from fighting over the same MT5 account
+    lock = ProcessLock("BRAIN_GETLEVERAGED", account="107245")
+
+    try:
+        with lock:
+            logging.info("=" * 60)
+            logging.info("BRAIN_GETLEVERAGED - PROCESS LOCK ACQUIRED")
+            logging.info("=" * 60)
+            run_single_account()
+
+    except RuntimeError as e:
+        logging.error("=" * 60)
+        logging.error("PROCESS LOCK FAILURE")
+        logging.error("=" * 60)
+        logging.error(str(e))
+        logging.error("")
+        logging.error("Another instance of BRAIN_GETLEVERAGED is already running.")
+        logging.error("This prevents duplicate trades on account 107245.")
+        logging.error("")
+        logging.error("To stop all processes safely:")
+        logging.error("  Run: SAFE_SHUTDOWN.bat")
+        logging.error("")
+        logging.error("To check running processes:")
+        logging.error("  Run: python process_lock.py --list")
+        logging.error("=" * 60)
+        sys.exit(1)

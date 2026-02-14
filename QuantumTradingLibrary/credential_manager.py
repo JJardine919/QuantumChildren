@@ -61,7 +61,7 @@ ACCOUNT_METADATA = {
         "server": "AtlasFunded-Server",
         "terminal_path": r"C:\Program Files\Atlas Funded MT5 Terminal\terminal64.exe",
         "magic": 212001,
-        "symbols": ["BTCUSD", "ETHUSD", "XAUUSD"],
+        "symbols": ["ETHUSD"],
         "env_key": "ATLAS_PASSWORD"
     },
     "GL_3": {

@@ -71,6 +71,10 @@ from config_loader import (
     CONFIDENCE_THRESHOLD,
     LSTM_MAX_AGE_DAYS,
     AGENT_SL_MIN,
+    FTMO_DAILY_DD_PCT,
+    FTMO_TOTAL_DD_PCT,
+    FTMO_RISK_PER_TRADE as FTMO_RISK_PER_TRADE_CFG,
+    FTMO_ATR_MULTIPLIER_CFG,
 )
 
 # ============================================================
@@ -80,11 +84,14 @@ from config_loader import (
 # Monte Carlo simulation (CHALLENGE_SIMULATOR.py):
 #   $150 risk + ATR=0.5 -> 99.4% pass rate, zero breaches
 # ============================================================
-FTMO_RISK_PER_TRADE = 150.0   # $150 per trade (not $1)
-FTMO_ATR_MULTIPLIER = 0.5     # Wider ATR stops (not 0.0438)
+FTMO_RISK_PER_TRADE = FTMO_RISK_PER_TRADE_CFG   # From config, default $150
+FTMO_ATR_MULTIPLIER = FTMO_ATR_MULTIPLIER_CFG   # From config, default 0.5
 
 # Import credentials securely - passwords from .env file
 from credential_manager import get_credentials, CredentialError
+
+# Process lock to prevent duplicate launches
+from process_lock import ProcessLock
 
 # Pre-launch validation
 from prelaunch_validator import validate_prelaunch
@@ -342,6 +349,10 @@ class FTMOTrader:
         self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
         self.qnif_bridge = QNIFBridge() if QNIF_ENABLED else None
         self.connected = False
+        # FTMO drawdown protection: recorded once on first connect each day
+        self.initial_balance = 0.0       # Balance at account start (for total DD)
+        self.starting_balance = 0.0      # Balance at session start (for daily DD)
+        self._dd_blocked = False
 
     def connect(self) -> bool:
         """Connect ONCE and stay connected"""
@@ -362,11 +373,51 @@ class FTMOTrader:
 
         acc = mt5.account_info()
         if acc:
+            if self.initial_balance == 0.0:
+                self.initial_balance = acc.balance  # Set once, never reset
+            if self.starting_balance == 0.0:
+                self.starting_balance = acc.balance  # Daily starting balance
             logging.info(f"CONNECTED: {ACCOUNT['name']} | Balance: ${acc.balance:,.2f}")
             self.connected = True
             return True
 
         return False
+
+    def check_ftmo_drawdown(self) -> bool:
+        """Check FTMO daily and total drawdown limits using equity.
+        Returns True if trading is allowed, False if DD limit breached."""
+        acc = mt5.account_info()
+        if acc is None:
+            return False
+
+        equity = acc.equity
+
+        # Daily DD check: (starting_balance - equity) / starting_balance
+        if self.starting_balance > 0:
+            daily_dd_pct = (self.starting_balance - equity) / self.starting_balance * 100.0
+            if daily_dd_pct >= FTMO_DAILY_DD_PCT:
+                logging.critical(
+                    f"FTMO DAILY DD BREACH: {daily_dd_pct:.2f}% >= {FTMO_DAILY_DD_PCT}% | "
+                    f"Equity: ${equity:,.2f} | Start: ${self.starting_balance:,.2f} | "
+                    f"BLOCKING NEW TRADES"
+                )
+                self._dd_blocked = True
+                return False
+
+        # Total DD check: (initial_balance - equity) / initial_balance
+        if self.initial_balance > 0:
+            total_dd_pct = (self.initial_balance - equity) / self.initial_balance * 100.0
+            if total_dd_pct >= FTMO_TOTAL_DD_PCT:
+                logging.critical(
+                    f"FTMO TOTAL DD BREACH: {total_dd_pct:.2f}% >= {FTMO_TOTAL_DD_PCT}% | "
+                    f"Equity: ${equity:,.2f} | Initial: ${self.initial_balance:,.2f} | "
+                    f"BLOCKING NEW TRADES"
+                )
+                self._dd_blocked = True
+                return False
+
+        self._dd_blocked = False
+        return True
 
     def has_position(self, symbol: str) -> bool:
         positions = mt5.positions_get(symbol=symbol)
@@ -726,8 +777,13 @@ class FTMOTrader:
             logging.error("Connection lost - will retry next cycle")
             return
 
-        # Manage existing positions first (dynamic TP + rolling SL)
+        # Manage existing positions first (dynamic TP + rolling SL) -- always runs
         self.manage_positions()
+
+        # FTMO drawdown protection: block new trades if DD limits breached
+        if not self.check_ftmo_drawdown():
+            logging.warning("FTMO DD limit breached - managing positions only, no new trades")
+            return
 
         for symbol in ACCOUNT['symbols']:
             regime, fidelity, action, confidence = self.analyze(symbol)
@@ -749,7 +805,7 @@ class FTMOTrader:
                         'regime': regime.value,
                         'source': 'FTMO'
                     })
-                except:
+                except Exception:
                     pass
 
             # Apply TEQA quantum signal
@@ -811,6 +867,14 @@ def main():
 
     try:
         while True:
+            # Verify correct account before each cycle
+            acct = mt5.account_info()
+            if acct is None or acct.login != ACCOUNT['account']:
+                logging.critical(
+                    f"ACCOUNT MISMATCH! Expected {ACCOUNT['account']}, "
+                    f"got {acct.login if acct else 'None'}. Stopping to protect trades."
+                )
+                break
             trader.run_cycle()
             time.sleep(CHECK_INTERVAL)
     except KeyboardInterrupt:
@@ -820,10 +884,36 @@ def main():
 
 
 if __name__ == "__main__":
-    # Pre-launch validation - ensures experts are trained before trading
-    TRADING_SYMBOLS = ACCOUNT['symbols']
-    if not validate_prelaunch(symbols=TRADING_SYMBOLS):
-        logging.error("Pre-launch validation failed. Exiting.")
-        sys.exit(1)
+    # CRITICAL: Acquire process lock BEFORE doing anything
+    lock = ProcessLock("BRAIN_FTMO", account="1521063483")
 
-    main()
+    try:
+        with lock:
+            logging.info("=" * 60)
+            logging.info("BRAIN_FTMO - PROCESS LOCK ACQUIRED")
+            logging.info("=" * 60)
+
+            # Pre-launch validation - ensures experts are trained before trading
+            TRADING_SYMBOLS = ACCOUNT['symbols']
+            if not validate_prelaunch(symbols=TRADING_SYMBOLS):
+                logging.error("Pre-launch validation failed. Exiting.")
+                sys.exit(1)
+
+            main()
+
+    except RuntimeError as e:
+        logging.error("=" * 60)
+        logging.error("PROCESS LOCK FAILURE")
+        logging.error("=" * 60)
+        logging.error(str(e))
+        logging.error("")
+        logging.error("Another instance of BRAIN_FTMO is already running.")
+        logging.error("This prevents duplicate trades on account 1521063483.")
+        logging.error("")
+        logging.error("To stop all processes safely:")
+        logging.error("  Run: SAFE_SHUTDOWN.bat")
+        logging.error("")
+        logging.error("To check running processes:")
+        logging.error("  Run: python process_lock.py --list")
+        logging.error("=" * 60)
+        sys.exit(1)

@@ -73,6 +73,10 @@ from config_loader import (
     CONFIDENCE_THRESHOLD,
     LSTM_MAX_AGE_DAYS,
     AGENT_SL_MIN,
+    FTMO_DAILY_DD_PCT,
+    FTMO_TOTAL_DD_PCT,
+    FTMO_RISK_PERCENT as FTMO_RISK_PERCENT_CFG,
+    FTMO_ATR_MULTIPLIER_CFG,
 )
 
 # ============================================================
@@ -81,11 +85,14 @@ from config_loader import (
 # For $100K -> $75, $200K -> $150, etc.
 # ATR multiplier 0.5 for wider stops (lot adjusts to keep risk fixed)
 # ============================================================
-FTMO_RISK_PERCENT = 0.00075   # 0.075% of balance per trade
-FTMO_ATR_MULTIPLIER = 0.5     # Wider ATR stops
+FTMO_RISK_PERCENT = FTMO_RISK_PERCENT_CFG   # From config, default 0.075%
+FTMO_ATR_MULTIPLIER = FTMO_ATR_MULTIPLIER_CFG   # From config, default 0.5
 
 # Import credentials securely - passwords from .env file
 from credential_manager import get_credentials, CredentialError
+
+# Process lock to prevent duplicate launches
+from process_lock import ProcessLock
 
 # Pre-launch validation
 from prelaunch_validator import validate_prelaunch
@@ -336,6 +343,10 @@ class JimmyFTMOTrader:
         self.qnif_bridge = QNIFBridge() if QNIF_ENABLED else None
         self.connected = False
         self.risk_per_trade = 75.0  # default, updated on connect
+        # FTMO drawdown protection
+        self.initial_balance = 0.0       # Balance at account start (for total DD)
+        self.starting_balance = 0.0      # Balance at session start (for daily DD)
+        self._dd_blocked = False
 
     def connect(self) -> bool:
         if self.connected:
@@ -355,6 +366,10 @@ class JimmyFTMOTrader:
 
         acc = mt5.account_info()
         if acc:
+            if self.initial_balance == 0.0:
+                self.initial_balance = acc.balance  # Set once, never reset
+            if self.starting_balance == 0.0:
+                self.starting_balance = acc.balance  # Daily starting balance
             # Auto-scale risk: 0.075% of balance
             self.risk_per_trade = acc.balance * FTMO_RISK_PERCENT
             # Floor at $10, cap at $500
@@ -367,6 +382,42 @@ class JimmyFTMOTrader:
             return True
 
         return False
+
+    def check_ftmo_drawdown(self) -> bool:
+        """Check FTMO daily and total drawdown limits using equity.
+        Returns True if trading is allowed, False if DD limit breached."""
+        acc = mt5.account_info()
+        if acc is None:
+            return False
+
+        equity = acc.equity
+
+        # Daily DD check
+        if self.starting_balance > 0:
+            daily_dd_pct = (self.starting_balance - equity) / self.starting_balance * 100.0
+            if daily_dd_pct >= FTMO_DAILY_DD_PCT:
+                logging.critical(
+                    f"FTMO DAILY DD BREACH: {daily_dd_pct:.2f}% >= {FTMO_DAILY_DD_PCT}% | "
+                    f"Equity: ${equity:,.2f} | Start: ${self.starting_balance:,.2f} | "
+                    f"BLOCKING NEW TRADES"
+                )
+                self._dd_blocked = True
+                return False
+
+        # Total DD check
+        if self.initial_balance > 0:
+            total_dd_pct = (self.initial_balance - equity) / self.initial_balance * 100.0
+            if total_dd_pct >= FTMO_TOTAL_DD_PCT:
+                logging.critical(
+                    f"FTMO TOTAL DD BREACH: {total_dd_pct:.2f}% >= {FTMO_TOTAL_DD_PCT}% | "
+                    f"Equity: ${equity:,.2f} | Initial: ${self.initial_balance:,.2f} | "
+                    f"BLOCKING NEW TRADES"
+                )
+                self._dd_blocked = True
+                return False
+
+        self._dd_blocked = False
+        return True
 
     def has_position(self, symbol: str) -> bool:
         positions = mt5.positions_get(symbol=symbol)
@@ -721,8 +772,13 @@ class JimmyFTMOTrader:
             logging.error("Connection lost - will retry next cycle")
             return
 
-        # Manage existing positions first
+        # Manage existing positions first -- always runs
         self.manage_positions()
+
+        # FTMO drawdown protection: block new trades if DD limits breached
+        if not self.check_ftmo_drawdown():
+            logging.warning("FTMO DD limit breached - managing positions only, no new trades")
+            return
 
         for symbol in ACCOUNT['symbols']:
             regime, fidelity, action, confidence = self.analyze(symbol)
@@ -744,7 +800,7 @@ class JimmyFTMOTrader:
                         'regime': regime.value,
                         'source': 'JIMMY_FTMO'
                     })
-                except:
+                except Exception:
                     pass
 
             # Apply TEQA quantum signal
@@ -808,6 +864,14 @@ def main():
 
     try:
         while True:
+            # Verify correct account before each cycle
+            acct = mt5.account_info()
+            if acct is None or acct.login != ACCOUNT['account']:
+                logging.critical(
+                    f"ACCOUNT MISMATCH! Expected {ACCOUNT['account']}, "
+                    f"got {acct.login if acct else 'None'}. Stopping to protect trades."
+                )
+                break
             trader.run_cycle()
             time.sleep(CHECK_INTERVAL)
     except KeyboardInterrupt:
@@ -817,9 +881,35 @@ def main():
 
 
 if __name__ == "__main__":
-    TRADING_SYMBOLS = ACCOUNT['symbols']
-    if not validate_prelaunch(symbols=TRADING_SYMBOLS):
-        logging.error("Pre-launch validation failed. Exiting.")
-        sys.exit(1)
+    # CRITICAL: Acquire process lock BEFORE doing anything
+    lock = ProcessLock("BRAIN_JIMMY_FTMO", account="1512556097")
 
-    main()
+    try:
+        with lock:
+            logging.info("=" * 60)
+            logging.info("BRAIN_JIMMY_FTMO - PROCESS LOCK ACQUIRED")
+            logging.info("=" * 60)
+
+            TRADING_SYMBOLS = ACCOUNT['symbols']
+            if not validate_prelaunch(symbols=TRADING_SYMBOLS):
+                logging.error("Pre-launch validation failed. Exiting.")
+                sys.exit(1)
+
+            main()
+
+    except RuntimeError as e:
+        logging.error("=" * 60)
+        logging.error("PROCESS LOCK FAILURE")
+        logging.error("=" * 60)
+        logging.error(str(e))
+        logging.error("")
+        logging.error("Another instance of BRAIN_JIMMY_FTMO is already running.")
+        logging.error("This prevents duplicate trades on account 1512556097.")
+        logging.error("")
+        logging.error("To stop all processes safely:")
+        logging.error("  Run: SAFE_SHUTDOWN.bat")
+        logging.error("")
+        logging.error("To check running processes:")
+        logging.error("  Run: python process_lock.py --list")
+        logging.error("=" * 60)
+        sys.exit(1)

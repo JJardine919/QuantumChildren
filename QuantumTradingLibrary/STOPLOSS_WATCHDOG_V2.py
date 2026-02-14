@@ -453,63 +453,109 @@ class StopLossWatchdogV2:
     # --------------------------------------------------------
 
     def _force_close(self, position) -> bool:
-        """Force close a position that exceeds loss limit"""
+        """Force close a position that exceeds loss limit.
+
+        After the initial close attempt, re-checks for residual volume
+        from partial fills and retries up to MAX_FORCE_CLOSE_RETRIES times.
+        """
+        MAX_FORCE_CLOSE_RETRIES = 3
         symbol = position.symbol
         ticket = position.ticket
         volume = position.volume
         pos_type = position.type
         profit = position.profit
 
-        tick = mt5.symbol_info_tick(symbol)
-        if tick is None:
-            self.logger.error(f"Cannot get tick for {symbol}")
-            return False
-
-        if pos_type == mt5.POSITION_TYPE_BUY:
-            order_type = mt5.ORDER_TYPE_SELL
-            price = tick.bid
-        else:
-            order_type = mt5.ORDER_TYPE_BUY
-            price = tick.ask
-
         symbol_info = mt5.symbol_info(symbol)
         filling_mode = mt5.ORDER_FILLING_IOC
         if symbol_info and symbol_info.filling_mode & mt5.ORDER_FILLING_FOK:
             filling_mode = mt5.ORDER_FILLING_FOK
 
-        request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
-            "volume": volume,
-            "type": order_type,
-            "position": ticket,
-            "price": price,
-            "deviation": 50,
-            "magic": 999999,
-            "comment": "WATCHDOG_V2_CLOSE",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": filling_mode,
-        }
+        remaining_volume = volume
+        attempt = 0
 
-        result = mt5.order_send(request)
-        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-            self.stats.positions_force_closed += 1
-            self.stats.total_loss_prevented += abs(profit) - self.loss_limit
+        while remaining_volume > 0 and attempt <= MAX_FORCE_CLOSE_RETRIES:
+            tick = mt5.symbol_info_tick(symbol)
+            if tick is None:
+                self.logger.error(f"Cannot get tick for {symbol}")
+                return False
+
+            if pos_type == mt5.POSITION_TYPE_BUY:
+                order_type = mt5.ORDER_TYPE_SELL
+                price = tick.bid
+            else:
+                order_type = mt5.ORDER_TYPE_BUY
+                price = tick.ask
+
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": remaining_volume,
+                "type": order_type,
+                "position": ticket,
+                "price": price,
+                "deviation": 50,
+                "magic": 999999,
+                "comment": "WATCHDOG_V2_CLOSE",
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": filling_mode,
+            }
+
+            if attempt > 0:
+                self.logger.warning(
+                    f"FORCE CLOSE RETRY #{ticket} {symbol} | "
+                    f"attempt {attempt}/{MAX_FORCE_CLOSE_RETRIES} | "
+                    f"residual volume: {remaining_volume}"
+                )
+
+            result = mt5.order_send(request)
+            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                # Check if position still exists with residual volume
+                time.sleep(0.5)  # Brief pause for server to update
+                residual_pos = mt5.positions_get(ticket=ticket)
+                if residual_pos and len(residual_pos) > 0:
+                    remaining_volume = residual_pos[0].volume
+                    if remaining_volume > 0:
+                        attempt += 1
+                        self.logger.warning(
+                            f"PARTIAL FILL on #{ticket} {symbol} | "
+                            f"residual: {remaining_volume} lots still open"
+                        )
+                        continue
+                # Fully closed
+                self.stats.positions_force_closed += 1
+                self.stats.total_loss_prevented += abs(profit) - self.loss_limit
+                self._log_event(WatchdogEvent(
+                    timestamp=datetime.now().isoformat(),
+                    event_type="FORCE_CLOSED",
+                    ticket=ticket,
+                    symbol=symbol,
+                    details=f"Force closed at ${profit:.2f} (limit: ${self.loss_limit})"
+                           + (f" [after {attempt} retries]" if attempt > 0 else ""),
+                    profit=profit,
+                    magic=position.magic,
+                ))
+                self.logger.info(f"FORCE CLOSED #{ticket} {symbol} @ ${profit:.2f}")
+                return True
+            else:
+                error_msg = f"{result.comment if result else 'None'} ({result.retcode if result else 'N/A'})"
+                self.logger.error(f"FORCE CLOSE FAILED #{ticket}: {error_msg}")
+                attempt += 1
+
+        if remaining_volume > 0:
+            self.logger.error(
+                f"FORCE CLOSE EXHAUSTED all {MAX_FORCE_CLOSE_RETRIES} retries for "
+                f"#{ticket} {symbol} | {remaining_volume} lots STILL OPEN with no SL!"
+            )
             self._log_event(WatchdogEvent(
                 timestamp=datetime.now().isoformat(),
-                event_type="FORCE_CLOSED",
+                event_type="FORCE_CLOSE_FAILED",
                 ticket=ticket,
                 symbol=symbol,
-                details=f"Force closed at ${profit:.2f} (limit: ${self.loss_limit})",
+                details=f"Failed after {MAX_FORCE_CLOSE_RETRIES} retries, {remaining_volume} lots remain",
                 profit=profit,
                 magic=position.magic,
             ))
-            self.logger.info(f"FORCE CLOSED #{ticket} {symbol} @ ${profit:.2f}")
-            return True
-        else:
-            error_msg = f"{result.comment if result else 'None'} ({result.retcode if result else 'N/A'})"
-            self.logger.error(f"FORCE CLOSE FAILED #{ticket}: {error_msg}")
-            return False
+        return False
 
     # --------------------------------------------------------
     # LOGGING
