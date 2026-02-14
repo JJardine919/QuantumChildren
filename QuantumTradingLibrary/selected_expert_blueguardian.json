@@ -1,9 +1,0 @@
-{
-  "selected_expert": "expert_C7_E36_WR72.json",
-  "original_win_rate": 72,
-  "entropy": 0.9650927477650482,
-  "compression_ratio": 3.0,
-  "projected_win_rate": 82.0,
-  "regime": "CLEAN",
-  "ready_for_deployment": true
-}
