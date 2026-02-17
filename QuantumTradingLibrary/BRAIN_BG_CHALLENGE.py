@@ -64,6 +64,7 @@ from config_loader import (
     ATR_MULTIPLIER,
     CHECK_INTERVAL_SECONDS as CHECK_INTERVAL,
     CONFIDENCE_THRESHOLD,
+    ETARE_CONFIDENCE_THRESHOLD,
     LSTM_MAX_AGE_DAYS,
     AGENT_SL_MIN,
 )
@@ -389,7 +390,7 @@ class ChallengeTrader:
                 state = prepare_etare_features(df_m5)
                 if state is not None:
                     direction, confidence = etare.predict(state)
-                    if confidence >= CONFIDENCE_THRESHOLD:
+                    if confidence >= ETARE_CONFIDENCE_THRESHOLD:
                         if direction == "BUY":
                             return regime, fidelity, Action.BUY, confidence
                         elif direction == "SELL":
@@ -630,7 +631,7 @@ class ChallengeTrader:
                         if state is not None:
                             direction, confidence = etare.predict(state)
                             pos_direction = "BUY" if pos.type == 0 else "SELL"
-                            if direction == pos_direction and confidence >= CONFIDENCE_THRESHOLD:
+                            if direction == pos_direction and confidence >= ETARE_CONFIDENCE_THRESHOLD:
                                 should_hold = True
                                 logging.info(
                                     f"EXPERT HOLD: {pos.symbol} #{pos.ticket} | "

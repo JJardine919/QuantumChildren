@@ -48,6 +48,7 @@ from config_loader import (
     SET_DYNAMIC_TP,
     ROLLING_SL_ENABLED,
     CONFIDENCE_THRESHOLD,
+    ETARE_CONFIDENCE_THRESHOLD,
     CHECK_INTERVAL_SECONDS,
     REQUIRE_TRAINED_EXPERT,
     LSTM_MAX_AGE_DAYS,
@@ -647,7 +648,7 @@ class AccountTrader:
                 if state is not None:
                     direction, confidence = etare.predict(state)
                     logging.info(f"[{self.account_key}][{symbol}] ETARE signal: {direction} ({confidence:.2f})")
-                    if confidence >= self.config.CONFIDENCE_THRESHOLD:
+                    if confidence >= ETARE_CONFIDENCE_THRESHOLD:
                         if direction == "BUY":
                             return regime, fidelity, Action.BUY, confidence
                         elif direction == "SELL":
