@@ -19,7 +19,7 @@ try:
     from config_loader import ACCOUNTS, MAX_LOSS_DOLLARS, AGENT_SL_MAX
 except ImportError:
     ACCOUNTS = {}
-    MAX_LOSS_DOLLARS = 1.50
+    MAX_LOSS_DOLLARS = 1.00
     AGENT_SL_MAX = 1.00
 
 
@@ -418,7 +418,7 @@ def handle_request(request: dict) -> dict:
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "max_loss": {"type": "number", "description": "Max loss in dollars (default 1.50)"}
+                                "max_loss": {"type": "number", "description": "Max loss in dollars (default: AGENT_SL_MAX from config, typically $1.00)"}
                             }
                         }
                     },
@@ -471,23 +471,61 @@ def handle_request(request: dict) -> dict:
 
         try:
             if tool_name == "mt5_connect":
-                result = manager.connect(args.get("account_key"))
+                key = args.get("account_key")
+                if key and key not in ACCOUNTS:
+                    valid = ", ".join(ACCOUNTS.keys()) if ACCOUNTS else "(none loaded)"
+                    result = {"error": f"Unknown account_key '{key}'. Valid keys: {valid}"}
+                else:
+                    result = manager.connect(key)
             elif tool_name == "mt5_positions":
                 result = manager.get_positions()
             elif tool_name == "mt5_summary":
                 result = manager.get_account_summary()
             elif tool_name == "mt5_close":
-                result = manager.close_position(args["ticket"])
+                ticket = args.get("ticket")
+                if not isinstance(ticket, int) or ticket <= 0:
+                    result = {"error": f"Invalid ticket: {ticket}. Must be a positive integer."}
+                else:
+                    result = manager.close_position(ticket)
             elif tool_name == "mt5_close_losers":
-                result = manager.close_losing_positions(args.get("max_loss"))
+                max_loss = args.get("max_loss")
+                if max_loss is not None and (not isinstance(max_loss, (int, float)) or max_loss <= 0):
+                    result = {"error": f"Invalid max_loss: {max_loss}. Must be a positive number."}
+                elif max_loss is not None and max_loss > 10.0:
+                    result = {"error": f"max_loss={max_loss} exceeds safety cap of $10.00. Use a smaller value."}
+                else:
+                    result = manager.close_losing_positions(max_loss)
             elif tool_name == "mt5_modify_sl":
-                result = manager.modify_sl_tp(args["ticket"], sl=args["sl"])
+                ticket = args.get("ticket")
+                sl = args.get("sl")
+                if not isinstance(ticket, int) or ticket <= 0:
+                    result = {"error": f"Invalid ticket: {ticket}. Must be a positive integer."}
+                elif sl is not None and (not isinstance(sl, (int, float)) or sl < 0):
+                    result = {"error": f"Invalid SL: {sl}. Must be a non-negative number."}
+                elif sl == 0 or sl == 0.0:
+                    result = {"error": "Refusing to set SL=0 (removes stop loss). Use mt5_force_sl to set a proper SL."}
+                else:
+                    result = manager.modify_sl_tp(ticket, sl=sl)
             elif tool_name == "mt5_history":
-                result = manager.get_history(args.get("days", 1))
+                days = args.get("days", 1)
+                if not isinstance(days, int) or days < 1:
+                    days = 1
+                elif days > 90:
+                    days = 90
+                result = manager.get_history(days)
             elif tool_name == "mt5_scan_no_sl":
                 result = manager.scan_no_sl()
             elif tool_name == "mt5_force_sl":
-                result = manager.force_emergency_sl(args["ticket"], args.get("max_loss_dollars", 2.0))
+                ticket = args.get("ticket")
+                max_loss_dollars = args.get("max_loss_dollars", 2.0)
+                if not isinstance(ticket, int) or ticket <= 0:
+                    result = {"error": f"Invalid ticket: {ticket}. Must be a positive integer."}
+                elif not isinstance(max_loss_dollars, (int, float)) or max_loss_dollars <= 0:
+                    result = {"error": f"Invalid max_loss_dollars: {max_loss_dollars}. Must be positive."}
+                elif max_loss_dollars > 5.0:
+                    result = {"error": f"max_loss_dollars={max_loss_dollars} exceeds safety cap of $5.00. Use a smaller value."}
+                else:
+                    result = manager.force_emergency_sl(ticket, max_loss_dollars)
             else:
                 result = {"error": f"Unknown tool: {tool_name}"}
 

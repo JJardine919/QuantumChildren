@@ -323,20 +323,35 @@ class StopLossWatchdogV2:
                 details=f"Position #{ticket} no longer open",
             ))
 
-        # 5. Check total drawdown
+        # 5. Check total drawdown - ACTIVELY CLOSE worst losers when breached
         if total_floating < -self.max_drawdown:
             self.stats.drawdown_alerts += 1
             self.logger.warning(
-                f"*** DRAWDOWN ALERT *** Total floating: ${total_floating:.2f} exceeds limit ${self.max_drawdown}"
+                f"*** DRAWDOWN BREACHED *** Total floating: ${total_floating:.2f} exceeds limit ${self.max_drawdown}"
             )
             self._log_event(WatchdogEvent(
                 timestamp=datetime.now().isoformat(),
                 event_type="DRAWDOWN_ALERT",
                 ticket=0,
                 symbol="ALL",
-                details=f"Total floating P/L: ${total_floating:.2f} exceeds max drawdown ${self.max_drawdown}",
+                details=f"DRAWDOWN BREACHED: ${total_floating:.2f} exceeds limit ${self.max_drawdown} — closing worst losers",
                 profit=total_floating,
             ))
+
+            # Close losing positions starting from worst until drawdown is within limit
+            losers = sorted(
+                [p for p in positions if p.profit < 0],
+                key=lambda p: p.profit,  # Worst first
+            )
+            running_floating = total_floating
+            for pos in losers:
+                if running_floating >= -self.max_drawdown:
+                    break  # Back within limit
+                self.logger.warning(
+                    f"DRAWDOWN CLOSE: #{pos.ticket} {pos.symbol} P/L=${pos.profit:.2f}"
+                )
+                self._force_close(pos)
+                running_floating -= pos.profit  # Remove this position's loss from total
 
         self.stats.positions_monitored = len(positions)
 

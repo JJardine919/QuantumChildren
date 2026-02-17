@@ -367,6 +367,19 @@ class FTMOTrader:
             logging.error(f"MT5 init failed: {mt5.last_error()}")
             return False
 
+        # SAFETY: Check if another account is already logged in on this terminal.
+        # FTMO and JIMMY_FTMO share the same terminal — calling mt5.login() would
+        # kill the other account's open trades. Refuse to proceed if wrong account.
+        pre_check = mt5.account_info()
+        if pre_check and pre_check.login != ACCOUNT['account'] and pre_check.login != 0:
+            logging.error(
+                f"TERMINAL CONFLICT: Account {pre_check.login} is already logged in on this terminal. "
+                f"Logging in as {ACCOUNT['account']} would KILL its open trades. "
+                f"Install a second FTMO terminal to run both accounts simultaneously."
+            )
+            mt5.shutdown()
+            return False
+
         if not mt5.login(ACCOUNT['account'], password=ACCOUNT['password'], server=ACCOUNT['server']):
             logging.error(f"Login failed: {mt5.last_error()}")
             return False
