@@ -57,7 +57,12 @@ class ETAREExpert:
             self.hidden_weights = np.array(data["hidden_weights"])
             self.output_weights = np.array(data["output_weights"])
             self.hidden_bias = np.array(data["hidden_bias"])
-            self.hidden2_bias = np.array(data["hidden2_bias"])
+            if "hidden2_bias" in data:
+                self.hidden2_bias = np.array(data["hidden2_bias"])
+            else:
+                # Some experts only have one bias vector — zero-init layer 2 bias
+                hidden2_size = np.array(data["hidden_weights"]).shape[1]
+                self.hidden2_bias = np.zeros(hidden2_size)
             self.output_bias = np.array(data["output_bias"])
             self.feature_order = data.get("feature_order", [])
             self.fitness = data.get("fitness", 0.0)
@@ -105,10 +110,15 @@ class ETAREExpert:
             state = np.concatenate([state, pad])
 
         probs = self.forward(state)
-        action_idx = int(np.argmax(probs))
-        confidence = float(probs[action_idx])
-        direction = _ETARE_TO_DIRECTION[action_idx]
-        return direction, confidence
+        buy_prob = float(probs[0])   # OPEN_BUY
+        sell_prob = float(probs[1])  # OPEN_SELL
+        # Compare directional classes directly — argmax over all 6 is
+        # biased toward HOLD (4 of 6 classes).  The BRAIN scripts'
+        # ETARE_CONFIDENCE_THRESHOLD handles low-confidence filtering.
+        if buy_prob >= sell_prob:
+            return "BUY", buy_prob
+        else:
+            return "SELL", sell_prob
 
 
 def prepare_etare_features(df: pd.DataFrame, symbol: str = "BTCUSD") -> Optional[np.ndarray]:
