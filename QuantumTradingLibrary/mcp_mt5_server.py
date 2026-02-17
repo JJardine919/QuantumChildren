@@ -36,13 +36,31 @@ class MT5Manager:
         self.connected_account = None
 
     def connect(self, account_key: str = None) -> dict:
-        """Connect to MT5 account"""
-        # ALWAYS shutdown first to prevent terminal mixing
-        mt5.shutdown()
+        """Connect to MT5 account. Avoids unnecessary shutdown/login to protect open trades."""
+        # Check if already connected to the requested account
+        try:
+            existing = mt5.account_info()
+            if existing and account_key and account_key in ACCOUNTS:
+                if existing.login == ACCOUNTS[account_key]['account']:
+                    self.connected_account = existing.login
+                    return {
+                        "account": existing.login,
+                        "balance": existing.balance,
+                        "equity": existing.equity,
+                        "profit": existing.profit,
+                        "margin_free": existing.margin_free,
+                        "note": "Already connected to this account"
+                    }
+        except Exception:
+            pass  # Not initialized yet, proceed with connection
 
         if account_key and account_key in ACCOUNTS:
             acc = ACCOUNTS[account_key]
             terminal_path = acc.get('terminal_path')
+
+            # Only shutdown if switching to a different terminal
+            if self.connected_account is not None:
+                mt5.shutdown()
 
             if terminal_path:
                 if not mt5.initialize(path=terminal_path):
@@ -51,7 +69,11 @@ class MT5Manager:
                 if not mt5.initialize():
                     return {"error": f"Init failed: {mt5.last_error()}"}
 
-            if acc.get('password'):
+            # Check if terminal is already logged into the right account
+            pre_check = mt5.account_info()
+            if pre_check and pre_check.login == acc['account']:
+                pass  # Already correct, skip login
+            elif acc.get('password'):
                 if not mt5.login(acc['account'], password=acc['password'], server=acc['server']):
                     return {"error": f"Login failed: {mt5.last_error()}"}
         else:

@@ -77,6 +77,7 @@ from config_loader import (
     FTMO_TOTAL_DD_PCT,
     FTMO_RISK_PERCENT as FTMO_RISK_PERCENT_CFG,
     FTMO_ATR_MULTIPLIER_CFG,
+    FTMO_RISK_PER_TRADE,
 )
 
 # ============================================================
@@ -342,7 +343,7 @@ class JimmyFTMOTrader:
         self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
         self.qnif_bridge = QNIFBridge() if QNIF_ENABLED else None
         self.connected = False
-        self.risk_per_trade = 75.0  # default, updated on connect
+        self.risk_per_trade = FTMO_RISK_PER_TRADE  # from config, updated on connect
         # FTMO drawdown protection
         self.initial_balance = 0.0       # Balance at account start (for total DD)
         self.starting_balance = 0.0      # Balance at session start (for daily DD)
@@ -360,11 +361,12 @@ class JimmyFTMOTrader:
             logging.error(f"MT5 init failed: {mt5.last_error()}")
             return False
 
-        # SAFETY: Check if another account is already logged in on this terminal.
-        # FTMO and JIMMY_FTMO share the same terminal — calling mt5.login() would
-        # kill the other account's open trades. Refuse to proceed if wrong account.
+        # Check if already logged into the correct account (skip login to avoid killing trades)
         pre_check = mt5.account_info()
-        if pre_check and pre_check.login != ACCOUNT['account'] and pre_check.login != 0:
+        if pre_check and pre_check.login == ACCOUNT['account']:
+            logging.info(f"Already logged in as {ACCOUNT['account']}, skipping mt5.login()")
+        elif pre_check and pre_check.login != 0:
+            # SAFETY: Another account is logged in — don't kick it out
             logging.error(
                 f"TERMINAL CONFLICT: Account {pre_check.login} is already logged in on this terminal. "
                 f"Logging in as {ACCOUNT['account']} would KILL its open trades. "
@@ -372,10 +374,11 @@ class JimmyFTMOTrader:
             )
             mt5.shutdown()
             return False
-
-        if not mt5.login(ACCOUNT['account'], password=ACCOUNT['password'], server=ACCOUNT['server']):
-            logging.error(f"Login failed: {mt5.last_error()}")
-            return False
+        else:
+            # No account logged in — safe to login
+            if not mt5.login(ACCOUNT['account'], password=ACCOUNT['password'], server=ACCOUNT['server']):
+                logging.error(f"Login failed: {mt5.last_error()}")
+                return False
 
         acc = mt5.account_info()
         if acc:
@@ -383,10 +386,10 @@ class JimmyFTMOTrader:
                 self.initial_balance = acc.balance  # Set once, never reset
             if self.starting_balance == 0.0:
                 self.starting_balance = acc.balance  # Daily starting balance
-            # Auto-scale risk: 0.075% of balance
+            # Auto-scale risk: FTMO_RISK_PERCENT of balance
             self.risk_per_trade = acc.balance * FTMO_RISK_PERCENT
-            # Floor at $10, cap at $500
-            self.risk_per_trade = max(10.0, min(500.0, self.risk_per_trade))
+            # Floor at $10, cap at configured FTMO_RISK_PER_TRADE
+            self.risk_per_trade = max(10.0, min(FTMO_RISK_PER_TRADE, self.risk_per_trade))
             logging.info(
                 f"CONNECTED: {ACCOUNT['name']} | Balance: ${acc.balance:,.2f} | "
                 f"Risk: ${self.risk_per_trade:.2f}/trade"

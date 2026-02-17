@@ -367,11 +367,12 @@ class FTMOTrader:
             logging.error(f"MT5 init failed: {mt5.last_error()}")
             return False
 
-        # SAFETY: Check if another account is already logged in on this terminal.
-        # FTMO and JIMMY_FTMO share the same terminal — calling mt5.login() would
-        # kill the other account's open trades. Refuse to proceed if wrong account.
+        # Check if already logged into the correct account (skip login to avoid killing trades)
         pre_check = mt5.account_info()
-        if pre_check and pre_check.login != ACCOUNT['account'] and pre_check.login != 0:
+        if pre_check and pre_check.login == ACCOUNT['account']:
+            logging.info(f"Already logged in as {ACCOUNT['account']}, skipping mt5.login()")
+        elif pre_check and pre_check.login != 0:
+            # SAFETY: Another account is logged in — don't kick it out
             logging.error(
                 f"TERMINAL CONFLICT: Account {pre_check.login} is already logged in on this terminal. "
                 f"Logging in as {ACCOUNT['account']} would KILL its open trades. "
@@ -379,10 +380,11 @@ class FTMOTrader:
             )
             mt5.shutdown()
             return False
-
-        if not mt5.login(ACCOUNT['account'], password=ACCOUNT['password'], server=ACCOUNT['server']):
-            logging.error(f"Login failed: {mt5.last_error()}")
-            return False
+        else:
+            # No account logged in — safe to login
+            if not mt5.login(ACCOUNT['account'], password=ACCOUNT['password'], server=ACCOUNT['server']):
+                logging.error(f"Login failed: {mt5.last_error()}")
+                return False
 
         acc = mt5.account_info()
         if acc:
