@@ -63,8 +63,8 @@ class StopLossWatchdog:
                 acc = mt5.account_info()
                 if acc and acc.login == self.account['account']:
                     return True
-            except:
-                pass
+            except Exception:
+                pass  # MT5 not initialized yet
             self.connected = False
 
         # Initialize MT5

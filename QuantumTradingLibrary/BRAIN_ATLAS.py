@@ -57,6 +57,7 @@ from config_loader import (
     REST_CRYPTO_WINDOWS,
     REST_PERSIST_ON_TRADE_CLOSE,
     get_asset_class,
+    LOSS_COOLDOWN_MINUTES,
 )
 
 # Import credentials securely - passwords from .env file
@@ -74,6 +75,14 @@ try:
     STATE_PERSISTENCE_ENABLED = True
 except ImportError:
     STATE_PERSISTENCE_ENABLED = False
+
+# ETARE feedforward expert (preferred over Conv1D/LSTM)
+try:
+    from etare_expert import load_etare_expert, ETAREExpert
+    from nociception import prepare_nociception_features
+    ETARE_AVAILABLE = True
+except ImportError:
+    ETARE_AVAILABLE = False
 
 # TEQA quantum signal bridge
 try:
@@ -213,6 +222,34 @@ class LSTMModel(nn.Module):
         return out
 
 
+class Conv1DModel(nn.Module):
+    """GPU-compatible Conv1D model (DirectML). Same interface as LSTMModel."""
+    def __init__(self, input_size=8, hidden_size=128, output_size=3):
+        super().__init__()
+        import torch.nn.functional as F
+        self.conv1 = nn.Conv1d(input_size, 64, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.conv2 = nn.Conv1d(64, hidden_size, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm1d(hidden_size)
+        self.conv3 = nn.Conv1d(hidden_size, hidden_size, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm1d(hidden_size)
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.dropout = nn.Dropout(0.2)
+        self.fc = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        import torch.nn.functional as F
+        if len(x.shape) == 2:
+            x = x.unsqueeze(1)
+        x = x.transpose(1, 2)
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = self.pool(x).squeeze(-1)
+        x = self.dropout(x)
+        return self.fc(x)
+
+
 # ============================================================
 # REGIME DETECTOR (delegates to QuantumRegimeBridge)
 # ============================================================
@@ -307,16 +344,25 @@ class ExpertLoader:
         self._check_model_staleness(expert_path)
 
         try:
-            model = LSTMModel(
-                input_size=expert_info['input_size'],
-                hidden_size=expert_info['hidden_size'],
-                output_size=3,
-                num_layers=2
-            )
+            model_type = expert_info.get('model_type', 'lstm')
+            if model_type == 'conv1d':
+                model = Conv1DModel(
+                    input_size=expert_info['input_size'],
+                    hidden_size=expert_info['hidden_size'],
+                    output_size=3,
+                )
+            else:
+                model = LSTMModel(
+                    input_size=expert_info['input_size'],
+                    hidden_size=expert_info['hidden_size'],
+                    output_size=3,
+                    num_layers=2,
+                )
             state_dict = torch.load(str(expert_path), map_location='cpu', weights_only=False)
             model.load_state_dict(state_dict)
             model.eval()
             self.loaded_experts[filename] = model
+            logging.info(f"Loaded expert: {filename} (type={model_type})")
             return model
         except Exception as e:
             logging.error(f"Failed to load expert: {e}")
@@ -418,6 +464,8 @@ class AccountTrader:
         self.regime_detector = RegimeDetector(config)
         self.expert_loader = ExpertLoader()
         self.feature_engineer = FeatureEngineer()
+        self.etare_experts = {}
+        self._load_etare_experts()
         self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
         self.qnif_bridge = QNIFBridge() if QNIF_ENABLED else None
         self.feedback_poller = None
@@ -479,7 +527,18 @@ class AccountTrader:
         # Loss cooldown — prevent re-entry after SL hit
         # Key: symbol, Value: datetime when cooldown expires
         self._loss_cooldown: Dict[str, datetime] = {}
-        self.LOSS_COOLDOWN_MINUTES = 15  # Wait 15 min after a loss before re-entering
+        self.LOSS_COOLDOWN_MINUTES = LOSS_COOLDOWN_MINUTES  # from config
+
+    def _load_etare_experts(self):
+        """Load ETARE feedforward experts (preferred over Conv1D)."""
+        if not ETARE_AVAILABLE:
+            logging.info(f"[{self.account_key}] ETARE not available, using Conv1D fallback")
+            return
+        for symbol in ['BTCUSD', 'XAUUSD', 'ETHUSD']:
+            expert = load_etare_expert(symbol)
+            if expert:
+                self.etare_experts[symbol] = expert
+                logging.info(f"[{self.account_key}] ETARE expert loaded for {symbol} (WR={expert.win_rate*100:.1f}%)")
 
     def connect(self) -> bool:
         """Connect to MT5 - ONLY accept correct account"""
@@ -497,8 +556,8 @@ class AccountTrader:
                     logging.error(f"[{self.account_key}] WRONG ACCOUNT! Expected {expected_account}, got {current_account.login}")
                     logging.error(f"[{self.account_key}] Will NOT trade - refusing to switch accounts")
                     return False
-        except:
-            pass
+        except Exception:
+            pass  # MT5 not initialized yet
 
         # Not connected - try to initialize
         terminal_path = self.account_config.get('terminal_path')
@@ -578,6 +637,26 @@ class AccountTrader:
         if regime != Regime.CLEAN:
             return regime, fidelity, Action.HOLD, 0.0
 
+        # Try ETARE feedforward expert first (74% WR vs 54% Conv1D)
+        etare = self.etare_experts.get(symbol)
+        if etare and ETARE_AVAILABLE:
+            rates_m5 = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 0, 200)
+            if rates_m5 is not None and len(rates_m5) >= 60:
+                df_m5 = pd.DataFrame(rates_m5)
+                df_m5['time'] = pd.to_datetime(df_m5['time'], unit='s')
+                features_all = prepare_nociception_features(df_m5)
+                if features_all is not None and len(features_all) > 0:
+                    state = features_all[-1]  # Last bar's 17 features
+                    direction, confidence = etare.predict(state)
+                    logging.info(f"[{self.account_key}][{symbol}] ETARE signal: {direction} ({confidence:.2f})")
+                    if confidence >= self.config.CONFIDENCE_THRESHOLD:
+                        if direction == "BUY":
+                            return regime, fidelity, Action.BUY, confidence
+                        elif direction == "SELL":
+                            return regime, fidelity, Action.SELL, confidence
+                    return regime, fidelity, Action.HOLD, confidence
+
+        # Fallback to Conv1D/LSTM expert
         expert = self.expert_loader.get_best_expert_for_symbol(symbol)
         if expert is None:
             return regime, fidelity, None, 0.0
@@ -1159,8 +1238,8 @@ class AtlasBrain:
                             print(f"  [DEL] patterns={af.total_patterns} | "
                                   f"het={af.het_patterns} hom={af.hom_patterns} | "
                                   f"health={af.health}")
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logging.debug(f"Protective deletion display error: {e}")
                     # Show Toxoplasma DD protection status
                     if trader.toxoplasma_engine is not None:
                         try:
@@ -1175,8 +1254,8 @@ class AtlasBrain:
                                     f"supp={dd_st['dopamine_suppression']:.3f}"
                                     f"{' | BLOCKED' if dd_st['dd_blocked'] else ''}"
                                 )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logging.debug(f"Toxoplasma display error: {e}")
 
                 # Periodic state save (every 30 min)
                 if sp and sp.should_periodic_save():

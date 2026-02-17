@@ -739,8 +739,8 @@ class ChallengeTrader:
                         'regime': regime.value,
                         'source': 'BG_CHALLENGE'
                     })
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.debug(f"Entropy collection failed: {e}")
 
             # Apply TEQA quantum signal
             if self.teqa_bridge is not None and action is not None:

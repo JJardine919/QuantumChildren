@@ -820,8 +820,8 @@ class FTMOTrader:
                         'regime': regime.value,
                         'source': 'FTMO'
                     })
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.debug(f"Entropy collection failed: {e}")
 
             # Apply TEQA quantum signal
             if self.teqa_bridge is not None and action is not None:

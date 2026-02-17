@@ -10,7 +10,7 @@
         "DYNAMIC_TP_PERCENT": 50,
         "SET_DYNAMIC_TP": true,
         "ROLLING_SL_ENABLED": true,
-        "CONFIDENCE_THRESHOLD": 0.55,
+        "CONFIDENCE_THRESHOLD": 0.50,
         "AGENT_SL_MIN": 0.50,
         "AGENT_SL_MAX": 1.00,
         "WATCHDOG_LIMIT": 1.00,
@@ -19,6 +19,7 @@
         "REQUIRE_TRAINED_EXPERT": true,
         "LSTM_MAX_AGE_DAYS": 7,
         "SOFTMAX_TEMPERATURE": 0.35,
+        "LOSS_COOLDOWN_MINUTES": 15,
         "SYMBOL_OVERRIDES": {
             "ETHUSD": {
                 "MAX_LOSS_DOLLARS": 2.00,
@@ -64,7 +65,7 @@
             "server": "AtlasFunded-Server",
             "terminal_path": "C:\\Program Files\\Atlas Funded MT5 Terminal\\terminal64.exe",
             "magic": 212001,
-            "symbols": ["ETHUSD"],
+            "symbols": ["BTCUSD", "ETHUSD", "XAUUSD"],
             "enabled": true
         },
         "GL_1": {
