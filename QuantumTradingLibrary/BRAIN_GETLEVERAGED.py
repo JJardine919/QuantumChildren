@@ -48,6 +48,7 @@ from config_loader import (
     LSTM_MAX_AGE_DAYS,
     AGENT_SL_MIN,
     SOFTMAX_TEMPERATURE,
+    get_symbol_risk,
 )
 
 # Secure credential loading (H-1: no plaintext passwords)
@@ -72,6 +73,20 @@ try:
     QNIF_ENABLED = True
 except ImportError:
     QNIF_ENABLED = False
+
+# HSBC-IBM DEEPCOMPRESS entropy archiver (4-qubit ZZFeatureMap preprocessor)
+try:
+    from entropy_archiver import DeepCompressArchiver, TIMEFRAMES as DC_TIMEFRAMES
+    DEEPCOMPRESS_ENABLED = True
+except ImportError:
+    DEEPCOMPRESS_ENABLED = False
+
+# NOCICEPTION: Neural Pain-Signal Trading Engine (81 champions, 3 WR100 brains)
+try:
+    from nociception import NociceptionBrain, apply_nociception_signal
+    NOCICEPTION_ENABLED = True
+except ImportError:
+    NOCICEPTION_ENABLED = False
 
 # Configure logging
 logging.basicConfig(
@@ -380,6 +395,12 @@ class AccountTrader:
         # H-5: TEQA bridge
         self.teqa_bridge = TEQABridge() if TEQA_ENABLED else None
         self.qnif_bridge = QNIFBridge() if QNIF_ENABLED else None
+        # HSBC-IBM DEEPCOMPRESS entropy archiver
+        self.dc_archiver = DeepCompressArchiver(shots=4096) if DEEPCOMPRESS_ENABLED else None
+        self._dc_cycle = 0
+        self._DC_INTERVAL = 5  # Archive every 5th cycle (not every tick)
+        # NOCICEPTION: Neural Pain-Signal Engine (WR100 champion brains)
+        self.noci_brain = NociceptionBrain() if NOCICEPTION_ENABLED else None
 
     def connect(self) -> bool:
         """Connect ONCE at startup. Called only once — never re-logins."""
@@ -572,19 +593,34 @@ class AccountTrader:
         tick_size = symbol_info.trade_tick_size
         point = symbol_info.point
         stops_level = symbol_info.trade_stops_level
+        spread = symbol_info.spread
 
-        # Calculate SL distance using INITIAL_SL_DOLLARS ($0.60) from config
-        # Rolling SL in manage_positions() will widen to MAX_LOSS_DOLLARS ($1.00)
+        # Use per-symbol risk (e.g. ETHUSD=$2.00, others=$0.60 initial)
+        symbol_risk = get_symbol_risk(symbol)
+        initial_risk = min(INITIAL_SL_DOLLARS, symbol_risk)
+
+        # Calculate SL distance using initial risk from config
+        # Rolling SL in manage_positions() will widen to MAX_LOSS_DOLLARS
         if tick_value > 0 and lot > 0:
-            sl_ticks = INITIAL_SL_DOLLARS / (tick_value * lot)
+            sl_ticks = initial_risk / (tick_value * lot)
             sl_distance = sl_ticks * tick_size
         else:
-            sl_distance = 50 * point
+            sl_distance = 100 * point
 
-        # Respect broker's minimum stop level
-        min_sl_distance = (stops_level + 10) * point
+        # Respect broker's minimum stop level — include spread + safety buffer
+        min_sl_distance = (stops_level + spread + 20) * point
         if sl_distance < min_sl_distance:
+            logging.warning(f"[{self.account_key}][{symbol}] SL distance {sl_distance:.5f} < min {min_sl_distance:.5f}, adjusting")
             sl_distance = min_sl_distance
+            # Recalculate lot to maintain max loss limit with wider SL
+            new_sl_ticks = sl_distance / tick_size if tick_size > 0 else 0
+            if tick_value > 0 and new_sl_ticks > 0:
+                new_lot = initial_risk / (tick_value * new_sl_ticks)
+                new_lot = max(symbol_info.volume_min, new_lot)
+                new_lot = round(new_lot / symbol_info.volume_step) * symbol_info.volume_step
+                if new_lot < lot:
+                    lot = new_lot
+                    logging.info(f"[{self.account_key}][{symbol}] Reduced lot to {lot} to maintain ${initial_risk} max loss")
 
         # TP from config
         tp_distance = sl_distance * TP_MULTIPLIER
@@ -600,7 +636,20 @@ class AccountTrader:
             sl = price + sl_distance
             tp = price - tp_distance
 
-        logging.info(f"[{self.account_key}] SL Distance: {sl_distance:.2f} | Initial SL: ${INITIAL_SL_DOLLARS} (rolls to ${MAX_LOSS_DOLLARS})")
+        # Normalize to symbol's price precision
+        digits = symbol_info.digits
+        sl = round(sl, digits)
+        tp = round(tp, digits)
+        price = round(price, digits)
+
+        # Final validation: ensure stops are far enough from price
+        actual_sl_distance = abs(price - sl)
+        min_required = (stops_level + spread) * point
+        if actual_sl_distance < min_required:
+            logging.error(f"[{self.account_key}][{symbol}] ABORT: SL too close! Distance={actual_sl_distance:.5f}, Required={min_required:.5f}")
+            return False
+
+        logging.info(f"[{self.account_key}][{symbol}] SL Distance: {sl_distance:.5f} | Risk: ${initial_risk} (rolls to ${symbol_risk})")
 
         filling_mode = mt5.ORDER_FILLING_IOC
         if symbol_info.filling_mode & mt5.ORDER_FILLING_FOK:
@@ -751,6 +800,42 @@ class AccountTrader:
         for symbol in self.account_config['symbols']:
             regime, fidelity, action, confidence = self.analyze_symbol(symbol)
 
+            # NOCICEPTION: Apply neural pain-signal confirmation (before TEQA/QNIF)
+            noci_reason = ""
+            if self.noci_brain is not None and action is not None:
+                try:
+                    # Pull fresh data for nociception (17-feature pipeline)
+                    noci_rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 0, self.config.BARS_FOR_ANALYSIS)
+                    if noci_rates is not None and len(noci_rates) >= 50:
+                        noci_df = pd.DataFrame(noci_rates)
+                        noci_df['time'] = pd.to_datetime(noci_df['time'], unit='s')
+                        noci_signal = self.noci_brain.predict(symbol, noci_df)
+
+                        # Check if we have an existing position for close signals
+                        has_pos = self.has_position(symbol)
+                        pos_type = None
+                        if has_pos:
+                            positions = mt5.positions_get(symbol=symbol)
+                            if positions:
+                                for pos in positions:
+                                    if pos.magic == self.account_config['magic_number']:
+                                        pos_type = "BUY" if pos.type == 0 else "SELL"
+                                        break
+
+                        final_action_str, final_conf, noci_reason = apply_nociception_signal(
+                            noci_signal,
+                            action.name,
+                            confidence,
+                            has_position=has_pos,
+                            position_type=pos_type,
+                        )
+                        action_map = {'BUY': Action.BUY, 'SELL': Action.SELL, 'HOLD': Action.HOLD}
+                        action = action_map.get(final_action_str, Action.HOLD)
+                        confidence = final_conf
+                        logging.info(f"[{self.account_key}][{symbol}] {noci_reason}")
+                except Exception as ne:
+                    logging.debug(f"[{self.account_key}] NOCICEPTION error: {ne}")
+
             # H-5: Apply TEQA bridge if available
             if self.teqa_bridge is not None and action is not None:
                 lstm_action_str = action.name
@@ -810,6 +895,7 @@ class AccountTrader:
                 'confidence': confidence,
                 'trade_executed': trade_executed,
                 'growth': growth_reason if growth_reason else 'inactive',
+                'nociception': noci_reason if noci_reason else 'inactive',
             }
 
             # Send to QuantumChildren network
@@ -830,7 +916,47 @@ class AccountTrader:
                 except Exception as e:
                     pass  # Don't let collection errors affect trading
 
+        # DEEPCOMPRESS entropy archive (every Nth cycle)
+        if self.dc_archiver is not None:
+            self._dc_cycle += 1
+            if self._dc_cycle >= self._DC_INTERVAL:
+                self._dc_cycle = 0
+                try:
+                    self._run_deepcompress()
+                except Exception as e:
+                    logging.debug(f"[{self.account_key}] DEEPCOMPRESS error: {e}")
+
         return results
+
+    def _run_deepcompress(self):
+        """Pull live bars across 4 TFs for all symbols and run DEEPCOMPRESS."""
+        tf_map = {
+            "M1": mt5.TIMEFRAME_M1,
+            "M5": mt5.TIMEFRAME_M5,
+            "M15": mt5.TIMEFRAME_M15,
+            "H1": mt5.TIMEFRAME_H1,
+        }
+        symbols_data = {}
+        for symbol in self.account_config['symbols']:
+            bars_by_tf = {}
+            for tf_name, tf_const in tf_map.items():
+                rates = mt5.copy_rates_from_pos(symbol, tf_const, 0, 200)
+                if rates is not None and len(rates) >= 50:
+                    bars_by_tf[tf_name] = np.column_stack([
+                        rates['open'], rates['high'], rates['low'],
+                        rates['close'], rates['tick_volume'].astype(float),
+                    ])
+            if bars_by_tf:
+                symbols_data[symbol] = bars_by_tf
+
+        if symbols_data:
+            archives = self.dc_archiver.archive_multi(symbols_data)
+            for a in archives:
+                logging.info(
+                    f"[{self.account_key}][{a.symbol}] DEEPCOMPRESS: "
+                    f"Ratio={a.total_ratio:.1f}x | Patterns={a.total_patterns} | "
+                    f"Entropy={a.quantum_entropy:.3f}"
+                )
 
 
 # ============================================================
@@ -861,6 +987,8 @@ def run_single_account():
     print(f"  Account: {account_config['account']} (ONE account, ONE script)")
     print(f"  SL: ${MAX_LOSS_DOLLARS} | TP: {TP_MULTIPLIER}x | Dynamic TP: {DYNAMIC_TP_PERCENT}%")
     print(f"  Rolling SL: {ROLLING_SL_MULTIPLIER}x | TEQA: {'ON' if TEQA_ENABLED else 'OFF'}")
+    print(f"  DEEPCOMPRESS: {'ON (4Q ZZFeatureMap + 18 Active TEs)' if DEEPCOMPRESS_ENABLED else 'OFF'}")
+    print(f"  NOCICEPTION: {'ON (3 WR100 Neural Pain-Signal Brains)' if NOCICEPTION_ENABLED else 'OFF'}")
     print("=" * 60)
 
     # Connect ONCE at startup — never again
@@ -891,6 +1019,8 @@ def run_single_account():
                 print(f"  [{icon}] {symbol}: {data['regime']} | "
                       f"{data['action']} ({data['confidence']:.2f}) {status}")
 
+            if NOCICEPTION_ENABLED and trader.noci_brain:
+                print(f"  {trader.noci_brain.get_status_line()}")
             if TEQA_ENABLED and trader.teqa_bridge:
                 print(f"  {trader.teqa_bridge.get_status_line()}")
                 if QNIF_ENABLED and trader.qnif_bridge:
