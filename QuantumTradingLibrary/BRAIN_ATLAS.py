@@ -78,8 +78,7 @@ except ImportError:
 
 # ETARE feedforward expert (preferred over Conv1D/LSTM)
 try:
-    from etare_expert import load_etare_expert, ETAREExpert
-    from nociception import prepare_nociception_features
+    from etare_expert import load_etare_expert, ETAREExpert, prepare_etare_features
     ETARE_AVAILABLE = True
 except ImportError:
     ETARE_AVAILABLE = False
@@ -644,9 +643,8 @@ class AccountTrader:
             if rates_m5 is not None and len(rates_m5) >= 60:
                 df_m5 = pd.DataFrame(rates_m5)
                 df_m5['time'] = pd.to_datetime(df_m5['time'], unit='s')
-                features_all = prepare_nociception_features(df_m5)
-                if features_all is not None and len(features_all) > 0:
-                    state = features_all[-1]  # Last bar's 17 features
+                state = prepare_etare_features(df_m5, symbol=symbol)
+                if state is not None:
                     direction, confidence = etare.predict(state)
                     logging.info(f"[{self.account_key}][{symbol}] ETARE signal: {direction} ({confidence:.2f})")
                     if confidence >= self.config.CONFIDENCE_THRESHOLD:
